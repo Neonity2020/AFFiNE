@@ -12,10 +12,7 @@ import {
   waitForEditorLoad,
   waitForEmptyEditor,
 } from '@affine-test/kit/utils/page-logic';
-import {
-  openSettingModal,
-  openWorkspaceSettingPanel,
-} from '@affine-test/kit/utils/setting';
+import { openSettingModal } from '@affine-test/kit/utils/setting';
 import { createLocalWorkspace } from '@affine-test/kit/utils/workspace';
 import { expect } from '@playwright/test';
 
@@ -58,9 +55,14 @@ test('should have pagination in member list', async ({ page }) => {
   );
 
   await openSettingModal(page);
-  await openWorkspaceSettingPanel(page, 'test');
+  await page
+    .getByTestId('settings-sidebar')
+    .getByTestId('workspace-setting:members')
+    .click();
 
   await page.waitForTimeout(1000);
+
+  await page.getByTestId('confirm-modal-cancel').click();
 
   const firstPageMemberItemCount = await page
     .locator('[data-testid="member-item"]')

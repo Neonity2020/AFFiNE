@@ -1,6 +1,16 @@
+import { stopPropagation } from '@affine/core/utils';
 import type { EditorHost } from '@blocksuite/affine/block-std';
-import { type AIError, openFileOrFiles } from '@blocksuite/affine/blocks';
-import { assertExists, WithDisposable } from '@blocksuite/affine/global/utils';
+import {
+  type AIError,
+  openFileOrFiles,
+  unsafeCSSVarV2,
+} from '@blocksuite/affine/blocks';
+import {
+  assertExists,
+  SignalWatcher,
+  WithDisposable,
+} from '@blocksuite/affine/global/utils';
+import { ImageIcon, PublishIcon } from '@blocksuite/icons/lit';
 import { css, html, LitElement, nothing } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
@@ -10,12 +20,13 @@ import {
   ChatClearIcon,
   ChatSendIcon,
   CloseIcon,
-  ImageIcon,
 } from '../_common/icons';
 import { AIProvider } from '../provider';
 import { reportResponse } from '../utils/action-reporter';
 import { readBlobAsURL } from '../utils/image';
-import type { ChatContextValue, ChatMessage } from './chat-context';
+import type { AINetworkSearchConfig } from './chat-config';
+import type { ChatContextValue, ChatMessage, DocContext } from './chat-context';
+import { isDocChip } from './components/utils';
 
 const MaximumImageCount = 32;
 
@@ -24,7 +35,7 @@ function getFirstTwoLines(text: string) {
   return lines.slice(0, 2);
 }
 
-export class ChatPanelInput extends WithDisposable(LitElement) {
+export class ChatPanelInput extends SignalWatcher(WithDisposable(LitElement)) {
   static override styles = css`
     .chat-panel-input {
       display: flex;
@@ -104,10 +115,28 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
         margin-left: auto;
       }
 
-      .image-upload {
+      .image-upload,
+      .chat-network-search {
         display: flex;
         justify-content: center;
         align-items: center;
+        svg {
+          width: 20px;
+          height: 20px;
+          color: ${unsafeCSSVarV2('icon/primary')};
+        }
+      }
+      .chat-network-search[data-active='true'] svg {
+        color: ${unsafeCSSVarV2('icon/activated')};
+      }
+
+      .image-upload[aria-disabled='true'],
+      .chat-network-search[aria-disabled='true'] {
+        cursor: not-allowed;
+      }
+      .image-upload[aria-disabled='true'] svg,
+      .chat-network-search[aria-disabled='true'] svg {
+        color: var(--affine-text-disable-color) !important;
       }
     }
 
@@ -235,6 +264,9 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
   @property({ attribute: false })
   accessor cleanupHistories!: () => Promise<void>;
 
+  @property({ attribute: false })
+  accessor networkSearchConfig!: AINetworkSearchConfig;
+
   private _addImages(images: File[]) {
     const oldImages = this.chatContextValue.images;
     this.updateContext({
@@ -279,8 +311,6 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
         <div
           class="close-wrapper"
           @click=${() => {
-            AIProvider.slots.toggleChatCards.emit({ visible: true });
-
             if (this.curIndex >= 0 && this.curIndex < images.length) {
               const newImages = [...images];
               newImages.splice(this.curIndex, 1);
@@ -296,11 +326,46 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
     `;
   }
 
+  private readonly _toggleNetworkSearch = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const enable = this.networkSearchConfig.enabled.value;
+    this.networkSearchConfig.setEnabled(!enable);
+  };
+
+  private readonly _uploadImageFiles = async (_e: MouseEvent) => {
+    const images = await openFileOrFiles({
+      acceptType: 'Images',
+      multiple: true,
+    });
+    if (!images) return;
+    this._addImages(images);
+  };
+
+  override connectedCallback() {
+    super.connectedCallback();
+
+    this._disposables.add(
+      AIProvider.slots.requestSendWithChat.on(
+        async ({ input, context, host }) => {
+          if (this.host === host) {
+            context && this.updateContext(context);
+            await this.updateComplete;
+            await this.send(input);
+          }
+        }
+      )
+    );
+  }
+
   protected override render() {
     const { images, status } = this.chatContextValue;
     const hasImages = images.length > 0;
     const maxHeight = hasImages ? 272 + 2 : 200 + 2;
-
+    const networkDisabled = !!this.chatContextValue.images.length;
+    const networkActive = !!this.networkSearchConfig.enabled.value;
+    const uploadDisabled = networkActive && !networkDisabled;
     return html`<style>
         .chat-panel-input {
           border-color: ${this.focused
@@ -323,7 +388,6 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
               <div
                 class="chat-quote-close"
                 @click=${() => {
-                  AIProvider.slots.toggleChatCards.emit({ visible: true });
                   this.updateContext({ quote: '', markdown: '' });
                 }}
               >
@@ -348,8 +412,7 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
           }}
           @keydown=${async (evt: KeyboardEvent) => {
             if (evt.key === 'Enter' && !evt.shiftKey && !evt.isComposing) {
-              evt.preventDefault();
-              await this.send();
+              this._onTextareaSend(evt);
             }
           }}
           @focus=${() => {
@@ -383,19 +446,29 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
           >
             ${ChatClearIcon}
           </div>
+          ${this.networkSearchConfig.visible.value
+            ? html`
+                <div
+                  class="chat-network-search"
+                  data-testid="chat-network-search"
+                  aria-disabled=${networkDisabled}
+                  data-active=${networkActive}
+                  @click=${networkDisabled
+                    ? undefined
+                    : this._toggleNetworkSearch}
+                  @pointerdown=${stopPropagation}
+                >
+                  ${PublishIcon()}
+                </div>
+              `
+            : nothing}
           ${images.length < MaximumImageCount
             ? html`<div
                 class="image-upload"
-                @click=${async () => {
-                  const images = await openFileOrFiles({
-                    acceptType: 'Images',
-                    multiple: true,
-                  });
-                  if (!images) return;
-                  this._addImages(images);
-                }}
+                aria-disabled=${uploadDisabled}
+                @click=${uploadDisabled ? undefined : this._uploadImageFiles}
               >
-                ${ImageIcon}
+                ${ImageIcon()}
               </div>`
             : nothing}
           ${status === 'transmitting'
@@ -409,7 +482,7 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
                 ${ChatAbortIcon}
               </div>`
             : html`<div
-                @click="${this.send}"
+                @click="${this._onTextareaSend}"
                 class="chat-panel-send"
                 aria-disabled=${this.isInputEmpty}
                 data-testid="chat-panel-send"
@@ -420,19 +493,30 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
       </div>`;
   }
 
-  send = async () => {
-    const { status, markdown } = this.chatContextValue;
-    if (status === 'loading' || status === 'transmitting') return;
+  private readonly _onTextareaSend = (e: MouseEvent | KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-    const text = this.textarea.value;
-    const { images } = this.chatContextValue;
-    if (!text && images.length === 0) {
-      return;
-    }
-    const { doc } = this.host;
+    const value = this.textarea.value.trim();
+    if (value.length === 0) return;
+
     this.textarea.value = '';
     this.isInputEmpty = true;
     this.textarea.style.height = 'unset';
+
+    this.send(value).catch(console.error);
+  };
+
+  send = async (text: string) => {
+    const { status, markdown, chips } = this.chatContextValue;
+    if (status === 'loading' || status === 'transmitting') return;
+
+    const { images } = this.chatContextValue;
+    if (!text) {
+      return;
+    }
+    const { doc } = this.host;
+
     this.updateContext({
       images: [],
       status: 'loading',
@@ -445,15 +529,14 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
       images?.map(image => readBlobAsURL(image))
     );
 
-    const content = (markdown ? `${markdown}\n` : '') + text;
-
+    const userInput = (markdown ? `${markdown}\n` : '') + text;
     this.updateContext({
       items: [
         ...this.chatContextValue.items,
         {
           id: '',
           role: 'user',
-          content: content,
+          content: userInput,
           createdAt: new Date().toISOString(),
           attachments,
         },
@@ -468,11 +551,19 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
 
     try {
       const abortController = new AbortController();
+      const docs: DocContext[] = chips
+        .filter(isDocChip)
+        .filter(chip => !!chip.markdown?.value && chip.state === 'success')
+        .map(chip => ({
+          docId: chip.docId,
+          markdown: chip.markdown?.value || '',
+        }));
       const stream = AIProvider.actions.chat?.({
-        input: content,
+        input: userInput,
+        docs: docs,
         docId: doc.id,
         attachments: images,
-        workspaceId: doc.collection.id,
+        workspaceId: doc.workspace.id,
         host: this.host,
         stream: true,
         signal: abortController.signal,
@@ -503,7 +594,7 @@ export class ChatPanelInput extends WithDisposable(LitElement) {
         const last = items[items.length - 1] as ChatMessage;
         if (!last.id) {
           const historyIds = await AIProvider.histories?.ids(
-            doc.collection.id,
+            doc.workspace.id,
             doc.id,
             { sessionId: this.chatContextValue.chatSessionId }
           );

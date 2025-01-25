@@ -38,6 +38,7 @@ export const menuContent = style({
   width: '100%',
   flexShrink: 0,
   padding: '13px 0px 13px 0px',
+  maxHeight: 'calc(100dvh - 32px)',
 });
 
 export const mobileMenuItem = style({
@@ -102,6 +103,7 @@ export const backButton = style({
   fontSize: 17,
   paddingLeft: 0,
   marginLeft: 20,
+  maxWidth: 'calc(100% - 20px)',
 });
 
 export const scrollArea = style({

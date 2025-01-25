@@ -2,7 +2,10 @@ import { Scrollable } from '@affine/component';
 import { PageDetailSkeleton } from '@affine/component/page-detail-skeleton';
 import { AIProvider } from '@affine/core/blocksuite/presets/ai';
 import { AffineErrorBoundary } from '@affine/core/components/affine/affine-error-boundary';
-import { BlockSuiteEditor } from '@affine/core/components/blocksuite/block-suite-editor';
+import {
+  BlockSuiteEditor,
+  CustomEditorWrapper,
+} from '@affine/core/components/blocksuite/block-suite-editor';
 import { EditorOutlineViewer } from '@affine/core/components/blocksuite/outline-viewer';
 import { PageNotFound } from '@affine/core/desktop/pages/404';
 import { EditorService } from '@affine/core/modules/editor';
@@ -11,7 +14,11 @@ import {
   type EdgelessRootService,
   RefNodeSlotsProvider,
 } from '@blocksuite/affine/blocks';
-import { Bound, DisposableGroup } from '@blocksuite/affine/global/utils';
+import {
+  Bound,
+  type Disposable,
+  DisposableGroup,
+} from '@blocksuite/affine/global/utils';
 import type { AffineEditorContainer } from '@blocksuite/affine/presets';
 import {
   FrameworkScope,
@@ -99,6 +106,9 @@ function DocPeekPreviewEditor({
       disposableGroup.add(
         // todo(@pengx17): seems not working
         refNodeSlots.docLinkClicked.on(options => {
+          if (options.host !== editorContainer.host) {
+            return;
+          }
           peekView
             .open({
               docRef: { docId: options.pageId },
@@ -108,10 +118,7 @@ function DocPeekPreviewEditor({
         })
       );
 
-      const unbind = editor.bindEditorContainer(
-        editorContainer,
-        (editorContainer as any).title
-      );
+      const unbind = editor.bindEditorContainer(editorContainer);
 
       if (mode === 'edgeless') {
         fitViewport(editorContainer, xywh);
@@ -126,17 +133,17 @@ function DocPeekPreviewEditor({
   );
 
   useEffect(() => {
-    const disposable = AIProvider.slots.requestOpenWithChat.on(() => {
+    const disposables: Disposable[] = [];
+    const openHandler = () => {
       if (doc) {
         workbench.openDoc(doc.id);
         peekView.close();
         // chat panel open is already handled in <DetailPageImpl />
       }
-    });
-
-    return () => {
-      disposable.dispose();
     };
+    disposables.push(AIProvider.slots.requestOpenWithChat.on(openHandler));
+    disposables.push(AIProvider.slots.requestSendWithChat.on(openHandler));
+    return () => disposables.forEach(d => d.dispose());
   }, [doc, peekView, workbench, workspace.id]);
 
   const openOutlinePanel = useCallback(() => {
@@ -152,28 +159,40 @@ function DocPeekPreviewEditor({
         <Scrollable.Viewport
           className={clsx('affine-page-viewport', styles.affineDocViewport)}
         >
-          <BlockSuiteEditor
-            className={styles.editor}
-            mode={mode}
-            page={doc.blockSuiteDoc}
-            onEditorReady={handleOnEditorReady}
-            defaultOpenProperty={defaultOpenProperty}
-          />
+          <CustomEditorWrapper>
+            <BlockSuiteEditor
+              className={styles.editor}
+              mode={mode}
+              page={doc.blockSuiteDoc}
+              onEditorReady={handleOnEditorReady}
+              defaultOpenProperty={defaultOpenProperty}
+            />
+          </CustomEditorWrapper>
         </Scrollable.Viewport>
         <Scrollable.Scrollbar />
       </Scrollable.Root>
-      <EditorOutlineViewer
-        editor={editorElement}
-        show={mode === 'page'}
-        openOutlinePanel={openOutlinePanel}
-      />
+      {!BUILD_CONFIG.isMobileEdition && !BUILD_CONFIG.isMobileWeb ? (
+        <EditorOutlineViewer
+          editor={editorElement}
+          show={mode === 'page'}
+          openOutlinePanel={openOutlinePanel}
+        />
+      ) : null}
     </AffineErrorBoundary>
   );
 }
 
 export function DocPeekPreview({ docRef }: { docRef: DocReferenceInfo }) {
-  const { docId, blockIds, elementIds, mode, xywh, databaseId, databaseRowId } =
-    docRef;
+  const {
+    docId,
+    blockIds,
+    elementIds,
+    mode,
+    xywh,
+    databaseId,
+    databaseDocId,
+    databaseRowId,
+  } = docRef;
   const { doc, editor, loading } = useEditor(
     docId,
     mode,
@@ -181,8 +200,9 @@ export function DocPeekPreview({ docRef }: { docRef: DocReferenceInfo }) {
       blockIds,
       elementIds,
     },
-    databaseId && databaseRowId
+    databaseId && databaseRowId && databaseDocId
       ? {
+          docId: databaseDocId,
           databaseId,
           databaseRowId,
           type: 'database',

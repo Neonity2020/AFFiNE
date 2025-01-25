@@ -36,7 +36,8 @@ export const NumberValue = ({ value, onChange }: PropertyValueProps) => {
     >
       <input
         className={styles.numberPropertyValueInput}
-        type={'number'}
+        type="number"
+        inputMode="decimal"
         value={tempValue || ''}
         onChange={handleOnChange}
         onBlur={handleBlur}

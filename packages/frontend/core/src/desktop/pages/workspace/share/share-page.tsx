@@ -4,13 +4,9 @@ import { useActiveBlocksuiteEditor } from '@affine/core/components/hooks/use-blo
 import { usePageDocumentTitle } from '@affine/core/components/hooks/use-global-state';
 import { useNavigateHelper } from '@affine/core/components/hooks/use-navigate-helper';
 import { PageDetailEditor } from '@affine/core/components/page-detail-editor';
-import { SharePageNotFoundError } from '@affine/core/components/share-page-not-found-error';
 import { AppContainer } from '@affine/core/desktop/components/app-container';
-import {
-  AuthService,
-  FetchService,
-  GraphQLService,
-} from '@affine/core/modules/cloud';
+import { AuthService, ServerService } from '@affine/core/modules/cloud';
+import { type Doc, DocsService } from '@affine/core/modules/doc';
 import {
   type Editor,
   type EditorSelector,
@@ -18,38 +14,23 @@ import {
   EditorsService,
 } from '@affine/core/modules/editor';
 import { PeekViewManagerModal } from '@affine/core/modules/peek-view';
-import { ShareReaderService } from '@affine/core/modules/share-doc';
 import { ViewIcon, ViewTitle } from '@affine/core/modules/workbench';
-import { CloudBlobStorage } from '@affine/core/modules/workspace-engine';
-import { WorkspaceFlavour } from '@affine/env/workspace';
+import {
+  type Workspace,
+  WorkspacesService,
+} from '@affine/core/modules/workspace';
 import { useI18n } from '@affine/i18n';
 import {
   type DocMode,
   DocModes,
   RefNodeSlotsProvider,
 } from '@blocksuite/affine/blocks';
+import { DisposableGroup } from '@blocksuite/affine/global/utils';
 import type { AffineEditorContainer } from '@blocksuite/affine/presets';
-import { DisposableGroup } from '@blocksuite/global/utils';
 import { Logo1Icon } from '@blocksuite/icons/rc';
-import type { Doc, Workspace } from '@toeverything/infra';
-import {
-  DocsService,
-  EmptyBlobStorage,
-  FrameworkScope,
-  ReadonlyDocStorage,
-  useLiveData,
-  useService,
-  useServices,
-  WorkspacesService,
-} from '@toeverything/infra';
+import { FrameworkScope, useLiveData, useService } from '@toeverything/infra';
 import clsx from 'clsx';
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import { PageNotFound } from '../../404';
@@ -64,14 +45,6 @@ export const SharePage = ({
   workspaceId: string;
   docId: string;
 }) => {
-  const { shareReaderService } = useServices({
-    ShareReaderService,
-  });
-
-  const isLoading = useLiveData(shareReaderService.reader.isLoading$);
-  const error = useLiveData(shareReaderService.reader.error$);
-  const data = useLiveData(shareReaderService.reader.data$);
-
   const location = useLocation();
 
   const { mode, selector, isTemplate, templateName, templateSnapshotUrl } =
@@ -103,43 +76,26 @@ export const SharePage = ({
       };
     }, [location.search]);
 
-  useEffect(() => {
-    shareReaderService.reader.loadShare({ workspaceId, docId });
-  }, [shareReaderService, docId, workspaceId]);
-
-  let element: ReactNode = null;
-
-  if (isLoading) {
-    element = null;
-  } else if (data) {
-    element = (
+  return (
+    <AppContainer>
       <SharePageInner
-        workspaceId={data.workspaceId}
-        docId={data.docId}
-        workspaceBinary={data.workspaceBinary}
-        docBinary={data.docBinary}
-        publishMode={mode || data.publishMode}
+        workspaceId={workspaceId}
+        docId={docId}
+        key={workspaceId + ':' + docId}
+        publishMode={mode ?? undefined}
         selector={selector}
         isTemplate={isTemplate}
         templateName={templateName}
         templateSnapshotUrl={templateSnapshotUrl}
       />
-    );
-  } else if (error) {
-    element = <SharePageNotFoundError />;
-  } else {
-    element = <PageNotFound noPermission />;
-  }
-
-  return <AppContainer fallback={!element}>{element}</AppContainer>;
+    </AppContainer>
+  );
 };
 
 const SharePageInner = ({
   workspaceId,
   docId,
-  workspaceBinary,
-  docBinary,
-  publishMode = 'page' as DocMode,
+  publishMode = 'page',
   selector,
   isTemplate,
   templateName,
@@ -147,20 +103,18 @@ const SharePageInner = ({
 }: {
   workspaceId: string;
   docId: string;
-  workspaceBinary: Uint8Array;
-  docBinary: Uint8Array;
   publishMode?: DocMode;
   selector?: EditorSelector;
   isTemplate?: boolean;
   templateName?: string;
   templateSnapshotUrl?: string;
 }) => {
+  const serverService = useService(ServerService);
   const workspacesService = useService(WorkspacesService);
-  const fetchService = useService(FetchService);
-  const graphQLService = useService(GraphQLService);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [page, setPage] = useState<Doc | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [noPermission, setNoPermission] = useState(false);
   const [editorContainer, setActiveBlocksuiteEditor] =
     useActiveBlocksuiteEditor();
 
@@ -170,45 +124,45 @@ const SharePageInner = ({
       {
         metadata: {
           id: workspaceId,
-          flavour: WorkspaceFlavour.AFFINE_CLOUD,
+          flavour: 'affine-cloud',
         },
         isSharedMode: true,
       },
       {
-        getDocStorage() {
-          return new ReadonlyDocStorage({
-            [workspaceId]: workspaceBinary,
-            [docId]: docBinary,
-          });
+        local: {
+          doc: {
+            name: 'StaticCloudDocStorage',
+            opts: {
+              id: workspaceId,
+              serverBaseUrl: serverService.server.baseUrl,
+            },
+          },
+          blob: {
+            name: 'CloudBlobStorage',
+            opts: {
+              id: workspaceId,
+              serverBaseUrl: serverService.server.baseUrl,
+            },
+          },
         },
-        getAwarenessConnections() {
-          return [];
-        },
-        getDocServer() {
-          return null;
-        },
-        getLocalBlobStorage() {
-          return EmptyBlobStorage;
-        },
-        getRemoteBlobStorages() {
-          return [
-            new CloudBlobStorage(workspaceId, fetchService, graphQLService),
-          ];
-        },
+        remotes: {},
       }
     );
 
     setWorkspace(workspace);
 
-    workspace.engine
-      .waitForRootDocReady()
-      .then(() => {
+    workspace.engine.doc
+      .waitForDocLoaded(workspace.id)
+      .then(async () => {
         const { doc } = workspace.scope.get(DocsService).open(docId);
+        doc.blockSuiteDoc.load();
+        doc.blockSuiteDoc.readonly = true;
 
-        workspace.docCollection.awarenessStore.setReadonly(
-          doc.blockSuiteDoc.blockCollection,
-          true
-        );
+        await workspace.engine.doc.waitForDocLoaded(docId);
+
+        if (!doc.blockSuiteDoc.root) {
+          throw new Error('Doc is empty');
+        }
 
         setPage(doc);
 
@@ -223,6 +177,7 @@ const SharePageInner = ({
       })
       .catch(err => {
         console.error(err);
+        setNoPermission(true);
       });
   }, [
     docId,
@@ -230,10 +185,7 @@ const SharePageInner = ({
     workspacesService,
     publishMode,
     selector,
-    workspaceBinary,
-    docBinary,
-    fetchService,
-    graphQLService,
+    serverService.server.baseUrl,
   ]);
 
   const t = useI18n();
@@ -277,6 +229,10 @@ const SharePageInner = ({
     },
     [editor, setActiveBlocksuiteEditor, jumpToPageBlock, openPage, workspaceId]
   );
+
+  if (noPermission) {
+    return <PageNotFound noPermission />;
+  }
 
   if (!workspace || !page || !editor) {
     return;

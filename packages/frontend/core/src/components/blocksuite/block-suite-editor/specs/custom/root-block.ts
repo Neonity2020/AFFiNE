@@ -1,42 +1,46 @@
 import {
-  AIEdgelessRootBlockSpec,
-  AIPageRootBlockSpec,
+  AICodeBlockSpec,
+  AIImageBlockSpec,
+  AIParagraphBlockSpec,
 } from '@affine/core/blocksuite/presets/ai';
+import { AIChatBlockSpec } from '@affine/core/blocksuite/presets/blocks';
+import { DocService, DocsService } from '@affine/core/modules/doc';
+import { DocDisplayMetaService } from '@affine/core/modules/doc-display-meta';
 import { EditorSettingService } from '@affine/core/modules/editor-setting';
 import { AppThemeService } from '@affine/core/modules/theme';
 import { mixpanel } from '@affine/track';
 import {
   ConfigExtension,
-  type ExtensionType,
   LifeCycleWatcher,
   StdIdentifier,
 } from '@blocksuite/affine/block-std';
 import type {
+  DocDisplayMetaExtension,
+  DocDisplayMetaParams,
   RootBlockConfig,
+  Signal,
+  SpecBuilder,
   TelemetryEventMap,
   ThemeExtension,
 } from '@blocksuite/affine/blocks';
 import {
+  CodeBlockSpec,
   ColorScheme,
-  EdgelessBuiltInManager,
-  EdgelessRootBlockSpec,
-  EdgelessToolExtension,
+  createSignalFromObservable,
+  DocDisplayMetaProvider,
   EditorSettingExtension,
-  FontLoaderService,
-  PageRootBlockSpec,
+  ImageBlockSpec,
+  ParagraphBlockSpec,
+  referenceToNode,
+  SpecProvider,
   TelemetryProvider,
   ThemeExtensionIdentifier,
 } from '@blocksuite/affine/blocks';
-import {
-  createSignalFromObservable,
-  type Signal,
-} from '@blocksuite/affine-shared/utils';
-import type { Container } from '@blocksuite/global/di';
-import {
-  DocService,
-  DocsService,
-  type FrameworkProvider,
-} from '@toeverything/infra';
+import type { Container } from '@blocksuite/affine/global/di';
+import type { ExtensionType } from '@blocksuite/affine/store';
+import { LinkedPageIcon, PageIcon } from '@blocksuite/icons/lit';
+import { type FrameworkProvider } from '@toeverything/infra';
+import type { TemplateResult } from 'lit';
 import type { Observable } from 'rxjs';
 import { combineLatest, map } from 'rxjs';
 
@@ -60,7 +64,7 @@ function getTelemetryExtension(): ExtensionType {
   };
 }
 
-function createThemeExtension(framework: FrameworkProvider) {
+function getThemeExtension(framework: FrameworkProvider) {
   class AffineThemeExtension
     extends LifeCycleWatcher
     implements ThemeExtension
@@ -139,46 +143,137 @@ function createThemeExtension(framework: FrameworkProvider) {
   return AffineThemeExtension;
 }
 
+export function buildDocDisplayMetaExtension(framework: FrameworkProvider) {
+  const docDisplayMetaService = framework.get(DocDisplayMetaService);
+
+  function iconBuilder(
+    icon: typeof PageIcon,
+    size = '1.25em',
+    style = 'user-select:none;flex-shrink:0;vertical-align:middle;font-size:inherit;margin-bottom:0.1em;'
+  ) {
+    return icon({
+      width: size,
+      height: size,
+      style,
+    });
+  }
+
+  class AffineDocDisplayMetaService
+    extends LifeCycleWatcher
+    implements DocDisplayMetaExtension
+  {
+    static override key = 'doc-display-meta';
+
+    readonly disposables: (() => void)[] = [];
+
+    static override setup(di: Container) {
+      super.setup(di);
+      di.override(DocDisplayMetaProvider, this, [StdIdentifier]);
+    }
+
+    dispose() {
+      while (this.disposables.length > 0) {
+        this.disposables.pop()?.();
+      }
+    }
+
+    icon(
+      docId: string,
+      { params, title, referenced }: DocDisplayMetaParams = {}
+    ): Signal<TemplateResult> {
+      const icon$ = docDisplayMetaService
+        .icon$(docId, {
+          type: 'lit',
+          title,
+          reference: referenced,
+          referenceToNode: referenceToNode({ pageId: docId, params }),
+        })
+        .map(iconBuilder);
+
+      const { signal: iconSignal, cleanup } = createSignalFromObservable(
+        icon$,
+        iconBuilder(referenced ? LinkedPageIcon : PageIcon)
+      );
+
+      this.disposables.push(cleanup);
+
+      return iconSignal;
+    }
+
+    title(
+      docId: string,
+      { title, referenced }: DocDisplayMetaParams = {}
+    ): Signal<string> {
+      const title$ = docDisplayMetaService.title$(docId, {
+        title,
+        reference: referenced,
+      });
+
+      const { signal: titleSignal, cleanup } =
+        createSignalFromObservable<string>(title$, title ?? '');
+
+      this.disposables.push(cleanup);
+
+      return titleSignal;
+    }
+
+    override unmounted() {
+      this.dispose();
+    }
+  }
+
+  return AffineDocDisplayMetaService;
+}
+
 function getEditorConfigExtension(
   framework: FrameworkProvider
 ): ExtensionType[] {
   const editorSettingService = framework.get(EditorSettingService);
   return [
     EditorSettingExtension(editorSettingService.editorSetting.settingSignal),
+    ConfigExtension('affine:database', createDatabaseOptionsConfig(framework)),
     ConfigExtension('affine:page', {
       linkedWidget: createLinkedWidgetConfig(framework),
       toolbarMoreMenu: createToolbarMoreMenuConfig(framework),
-      databaseOptions: createDatabaseOptionsConfig(framework),
     } satisfies RootBlockConfig),
   ];
 }
 
-export function createPageRootBlockSpec(
+export const extendEdgelessPreviewSpec = (function () {
+  let _extension: ExtensionType;
+  let _framework: FrameworkProvider;
+  return function (framework: FrameworkProvider) {
+    if (framework === _framework && _extension) {
+      return _extension;
+    } else {
+      _extension &&
+        SpecProvider.getInstance().omitSpec('edgeless:preview', _extension);
+      _extension = getThemeExtension(framework);
+      _framework = framework;
+      SpecProvider.getInstance().extendSpec('edgeless:preview', [_extension]);
+      return _extension;
+    }
+  };
+})();
+
+export function enableAffineExtension(
   framework: FrameworkProvider,
-  enableAI: boolean
-): ExtensionType[] {
-  return [
-    enableAI ? AIPageRootBlockSpec : PageRootBlockSpec,
-    FontLoaderService,
-    createThemeExtension(framework),
-    getFontConfigExtension(),
-    getTelemetryExtension(),
-    getEditorConfigExtension(framework),
-  ].flat();
+  specBuilder: SpecBuilder
+): void {
+  specBuilder.extend(
+    [
+      getThemeExtension(framework),
+      getFontConfigExtension(),
+      getTelemetryExtension(),
+      getEditorConfigExtension(framework),
+      buildDocDisplayMetaExtension(framework),
+    ].flat()
+  );
 }
 
-export function createEdgelessRootBlockSpec(
-  framework: FrameworkProvider,
-  enableAI: boolean
-): ExtensionType[] {
-  return [
-    enableAI ? AIEdgelessRootBlockSpec : EdgelessRootBlockSpec,
-    FontLoaderService,
-    createThemeExtension(framework),
-    EdgelessToolExtension,
-    EdgelessBuiltInManager,
-    getFontConfigExtension(),
-    getTelemetryExtension(),
-    getEditorConfigExtension(framework),
-  ].flat();
+export function enableAIExtension(specBuilder: SpecBuilder): void {
+  specBuilder.replace(CodeBlockSpec, AICodeBlockSpec);
+  specBuilder.replace(ImageBlockSpec, AIImageBlockSpec);
+  specBuilder.replace(ParagraphBlockSpec, AIParagraphBlockSpec);
+  specBuilder.extend(AIChatBlockSpec);
 }

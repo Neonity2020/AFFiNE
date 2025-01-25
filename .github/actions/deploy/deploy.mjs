@@ -17,6 +17,7 @@ const {
   METRICS_CUSTOMER_IO_TOKEN,
   COPILOT_OPENAI_API_KEY,
   COPILOT_FAL_API_KEY,
+  COPILOT_PERPLEXITY_API_KEY,
   COPILOT_UNSPLASH_API_KEY,
   MAILER_SENDER,
   MAILER_USER,
@@ -41,7 +42,7 @@ const isBeta = buildType === 'beta';
 const isInternal = buildType === 'internal';
 
 const replicaConfig = {
-  production: {
+  stable: {
     web: 3,
     graphql: Number(process.env.PRODUCTION_GRAPHQL_REPLICA) || 3,
     sync: Number(process.env.PRODUCTION_SYNC_REPLICA) || 3,
@@ -147,6 +148,7 @@ const createHelmCommand = ({ isDryRun }) => {
     `--set        graphql.app.copilot.enabled=true`,
     `--set-string graphql.app.copilot.openai.key="${COPILOT_OPENAI_API_KEY}"`,
     `--set-string graphql.app.copilot.fal.key="${COPILOT_FAL_API_KEY}"`,
+    `--set-string graphql.app.copilot.perplexity.key="${COPILOT_PERPLEXITY_API_KEY}"`,
     `--set-string graphql.app.copilot.unsplash.key="${COPILOT_UNSPLASH_API_KEY}"`,
     `--set-string graphql.app.mailer.sender="${MAILER_SENDER}"`,
     `--set-string graphql.app.mailer.user="${MAILER_USER}"`,

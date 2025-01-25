@@ -6,8 +6,10 @@ import {
   EdgelessIcon,
   FileIcon,
   HistoryIcon,
+  LongerIcon,
   NumberIcon,
   TagIcon,
+  TemplateIcon,
   TextIcon,
   TodayIcon,
 } from '@blocksuite/icons/rc';
@@ -19,7 +21,9 @@ import { DocPrimaryModeValue } from './doc-primary-mode';
 import { EdgelessThemeValue } from './edgeless-theme';
 import { JournalValue } from './journal';
 import { NumberValue } from './number';
+import { PageWidthValue } from './page-width';
 import { TagsValue } from './tags';
+import { TemplateValue } from './template';
 import { TextValue } from './text';
 import type { PropertyValueProps } from './types';
 
@@ -99,6 +103,20 @@ export const DocPropertyTypes = {
     value: EdgelessThemeValue,
     name: 'com.affine.page-properties.property.edgelessTheme',
     description: 'com.affine.page-properties.property.edgelessTheme.tooltips',
+  },
+  pageWidth: {
+    icon: LongerIcon,
+    value: PageWidthValue,
+    name: 'com.affine.page-properties.property.pageWidth',
+    description: 'com.affine.page-properties.property.pageWidth.tooltips',
+  },
+  template: {
+    uniqueId: 'template',
+    icon: TemplateIcon,
+    value: TemplateValue,
+    name: 'com.affine.page-properties.property.template',
+    renameable: false,
+    description: 'com.affine.page-properties.property.template.tooltips',
   },
 } as Record<
   string,

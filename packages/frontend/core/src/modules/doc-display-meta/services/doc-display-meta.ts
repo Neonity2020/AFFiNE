@@ -1,6 +1,7 @@
 import { extractEmojiIcon } from '@affine/core/utils';
 import { i18nTime } from '@affine/i18n';
 import {
+  AliasIcon as LitAliasIcon,
   BlockLinkIcon as LitBlockLinkIcon,
   EdgelessIcon as LitEdgelessIcon,
   LinkedEdgelessIcon as LitLinkedEdgelessIcon,
@@ -11,6 +12,7 @@ import {
   YesterdayIcon as LitYesterdayIcon,
 } from '@blocksuite/icons/lit';
 import {
+  AliasIcon,
   BlockLinkIcon,
   EdgelessIcon,
   LinkedEdgelessIcon,
@@ -20,15 +22,13 @@ import {
   TomorrowIcon,
   YesterdayIcon,
 } from '@blocksuite/icons/rc';
-import type {
-  DocRecord,
-  DocsService,
-  FeatureFlagService,
-} from '@toeverything/infra';
 import { LiveData, Service } from '@toeverything/infra';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
+import type { DocRecord, DocsService } from '../../doc';
+import type { FeatureFlagService } from '../../feature-flag';
+import type { I18nService } from '../../i18n';
 import type { JournalService } from '../../journal';
 
 type IconType = 'rc' | 'lit';
@@ -40,6 +40,7 @@ interface DocDisplayIconOptions<T extends IconType> {
    * by default, it will use the `primaryMode$` of the doc.
    */
   mode?: 'edgeless' | 'page';
+  title?: string; // title alias
   reference?: boolean;
   referenceToNode?: boolean;
   /**
@@ -48,7 +49,7 @@ interface DocDisplayIconOptions<T extends IconType> {
   enableEmojiIcon?: boolean;
 }
 interface DocDisplayTitleOptions {
-  originalTitle?: string;
+  title?: string; // title alias
   reference?: boolean;
   /**
    * @default true
@@ -57,6 +58,7 @@ interface DocDisplayTitleOptions {
 }
 
 const rcIcons = {
+  AliasIcon,
   BlockLinkIcon,
   EdgelessIcon,
   LinkedEdgelessIcon,
@@ -67,6 +69,7 @@ const rcIcons = {
   YesterdayIcon,
 };
 const litIcons = {
+  AliasIcon: LitAliasIcon,
   BlockLinkIcon: LitBlockLinkIcon,
   EdgelessIcon: LitEdgelessIcon,
   LinkedEdgelessIcon: LitLinkedEdgelessIcon,
@@ -85,57 +88,84 @@ export class DocDisplayMetaService extends Service {
   constructor(
     private readonly journalService: JournalService,
     private readonly docsService: DocsService,
-    private readonly featureFlagService: FeatureFlagService
+    private readonly featureFlagService: FeatureFlagService,
+    private readonly i18nService: I18nService
   ) {
     super();
+  }
+
+  getJournalIcon(
+    journalDate: string | Dayjs,
+    options?: DocDisplayIconOptions<'rc'>
+  ): typeof TodayIcon;
+
+  getJournalIcon(
+    journalDate: string | Dayjs,
+    options?: DocDisplayIconOptions<'lit'>
+  ): typeof LitYesterdayIcon;
+
+  getJournalIcon<T extends IconType = 'rc'>(
+    journalDate: string | Dayjs,
+    options?: DocDisplayIconOptions<T>
+  ): T extends 'rc' ? typeof TodayIcon : typeof LitTodayIcon;
+
+  getJournalIcon<T extends IconType = 'rc'>(
+    journalDate: string | Dayjs,
+    options?: DocDisplayIconOptions<T>
+  ) {
+    const iconSet = icons[options?.type ?? 'rc'];
+    const day = dayjs(journalDate);
+    return day.isBefore(dayjs(), 'day')
+      ? iconSet.YesterdayIcon
+      : day.isAfter(dayjs(), 'day')
+        ? iconSet.TomorrowIcon
+        : iconSet.TodayIcon;
   }
 
   icon$<T extends IconType = 'rc'>(
     docId: string,
     options?: DocDisplayIconOptions<T>
-  ): LiveData<T extends 'lit' ? typeof LitTodayIcon : typeof TodayIcon> {
+  ) {
     const iconSet = icons[options?.type ?? 'rc'];
 
     return LiveData.computed(get => {
+      const enableEmojiIcon =
+        get(this.featureFlagService.flags.enable_emoji_doc_icon.$) &&
+        options?.enableEmojiIcon !== false;
       const doc = get(this.docsService.list.doc$(docId));
-      const title = doc ? get(doc.title$) : '';
+      const referenced = !!options?.reference;
+      const titleAlias = referenced ? options?.title : undefined;
+      const originalTitle = doc ? get(doc.title$) : '';
+      const title = titleAlias ?? originalTitle;
       const mode = doc ? get(doc.primaryMode$) : undefined;
       const finalMode = options?.mode ?? mode ?? 'page';
-      const referenceToNode = !!(options?.reference && options.referenceToNode);
+      const referenceToNode = !!(referenced && options.referenceToNode);
 
-      // increases block link priority
-      if (referenceToNode) {
-        return iconSet.BlockLinkIcon;
+      // emoji title
+      if (enableEmojiIcon && title) {
+        const { emoji } = extractEmojiIcon(title);
+        if (emoji) return () => emoji;
       }
 
-      // journal icon
+      // title alias
+      if (titleAlias) return iconSet.AliasIcon;
+
+      // link to specified block
+      if (referenceToNode) return iconSet.BlockLinkIcon;
+
+      // link to journal doc
       const journalDate = this._toDayjs(
-        this.journalService.journalDate$(docId).value
+        get(this.journalService.journalDate$(docId))
       );
       if (journalDate) {
-        if (!options?.compareDate) return iconSet.TodayIcon;
-        const compareDate = dayjs(options?.compareDate);
-        return journalDate.isBefore(compareDate, 'day')
-          ? iconSet.YesterdayIcon
-          : journalDate.isAfter(compareDate, 'day')
-            ? iconSet.TomorrowIcon
-            : iconSet.TodayIcon;
+        return this.getJournalIcon(journalDate, options);
       }
 
-      // reference icon
+      // link to regular doc (reference)
       if (options?.reference) {
         return finalMode === 'edgeless'
           ? iconSet.LinkedEdgelessIcon
           : iconSet.LinkedPageIcon;
-      }
-
-      // emoji icon
-      const enableEmojiIcon =
-        get(this.featureFlagService.flags.enable_emoji_doc_icon.$) &&
-        options?.enableEmojiIcon !== false;
-      if (enableEmojiIcon) {
-        const { emoji } = extractEmojiIcon(title);
-        if (emoji) return () => emoji;
       }
 
       // default icon
@@ -145,41 +175,57 @@ export class DocDisplayMetaService extends Service {
 
   title$(docId: string, options?: DocDisplayTitleOptions) {
     return LiveData.computed(get => {
+      const enableEmojiIcon =
+        get(this.featureFlagService.flags.enable_emoji_doc_icon.$) &&
+        options?.enableEmojiIcon !== false;
+      const lng = get(this.i18nService.i18n.currentLanguageKey$);
       const doc = get(this.docsService.list.doc$(docId));
-      const docTitle = doc ? get(doc.title$) : undefined;
+      const referenced = !!options?.reference;
+      const titleAlias = referenced ? options?.title : undefined;
+      const originalTitle = doc ? get(doc.title$) : '';
+      const title = titleAlias ?? originalTitle;
 
+      // emoji title
+      if (enableEmojiIcon && title) {
+        const { rest } = extractEmojiIcon(title);
+        if (rest) return rest;
+
+        // When the title has only one emoji character,
+        // if it's a journal document, the date should be displayed.
+        const journalDateString = get(this.journalService.journalDate$(docId));
+        if (journalDateString) {
+          return i18nTime(journalDateString, { absolute: { accuracy: 'day' } });
+        }
+      }
+
+      // title alias
+      if (titleAlias) return titleAlias;
+
+      // doc not found
+      if (!doc) {
+        return this.i18nService.i18n.i18next.t(
+          'com.affine.notFoundPage.title',
+          { lng }
+        );
+      }
+
+      // journal title
       const journalDateString = get(this.journalService.journalDate$(docId));
-
-      // journal
       if (journalDateString) {
         return i18nTime(journalDateString, { absolute: { accuracy: 'day' } });
       }
 
-      if (options?.originalTitle) return options.originalTitle;
+      // original title
+      if (originalTitle) return originalTitle;
 
       // empty title
-      if (!docTitle) return { i18nKey: 'Untitled' } as const;
-
-      // reference
-      if (options?.reference) return docTitle;
-
-      // check emoji
-      const enableEmojiIcon =
-        get(this.featureFlagService.flags.enable_emoji_doc_icon.$) &&
-        options?.enableEmojiIcon !== false;
-      if (enableEmojiIcon) {
-        const { rest } = extractEmojiIcon(docTitle);
-        return rest;
-      }
-
-      // default
-      return docTitle;
+      return this.i18nService.i18n.i18next.t('Untitled', { lng });
     });
   }
 
-  getDocDisplayMeta(docRecord: DocRecord, originalTitle?: string) {
+  getDocDisplayMeta(docRecord: DocRecord) {
     return {
-      title: this.title$(docRecord.id, { originalTitle }).value,
+      title: this.title$(docRecord.id).value,
       icon: this.icon$(docRecord.id).value,
       updatedDate: docRecord.meta$.value.updatedDate,
     };

@@ -1,15 +1,12 @@
 import type { DefaultOpenProperty } from '@affine/core/components/doc-properties';
 import type { DocMode } from '@blocksuite/affine/blocks';
-import type { Doc } from '@toeverything/infra';
-import {
-  DocsService,
-  useLiveData,
-  useService,
-  WorkspaceService,
-} from '@toeverything/infra';
+import { useLiveData, useService } from '@toeverything/infra';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import type { Doc } from '../../doc';
+import { DocsService } from '../../doc';
 import { type Editor, type EditorSelector, EditorsService } from '../../editor';
+import { WorkspaceService } from '../../workspace';
 
 export const useEditor = (
   pageId: string,
@@ -55,10 +52,7 @@ export const useEditor = (
 
   // set sync engine priority target
   useEffect(() => {
-    currentWorkspace.engine.doc.setPriority(pageId, 10);
-    return () => {
-      currentWorkspace.engine.doc.setPriority(pageId, 5);
-    };
+    return currentWorkspace.engine.doc.addPriority(pageId, 10);
   }, [currentWorkspace, pageId]);
 
   return { doc, editor, workspace: currentWorkspace, loading: !docListReady };

@@ -7,21 +7,30 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   ios: {
     path: '.',
+    webContentsDebuggingEnabled: true,
   },
   server: {
     // url: 'http://localhost:8080',
   },
   plugins: {
     CapacitorCookies: {
-      enabled: true,
+      enabled: false,
     },
     CapacitorHttp: {
-      enabled: true,
+      enabled: false,
     },
     Keyboard: {
       resize: KeyboardResize.Native,
     },
   },
 };
+
+if (process.env.CAP_SERVER_URL) {
+  Object.assign(config, {
+    server: {
+      url: process.env.CAP_SERVER_URL,
+    },
+  });
+}
 
 export default config;

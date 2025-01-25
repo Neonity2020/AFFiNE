@@ -8,29 +8,28 @@ import {
   useDraggable,
   useDropTarget,
 } from '@affine/component';
+import type { DocCustomPropertyInfo } from '@affine/core/modules/db';
+import { DocService, DocsService } from '@affine/core/modules/doc';
 import { DocDatabaseBacklinkInfo } from '@affine/core/modules/doc-info';
 import type {
   DatabaseRow,
   DatabaseValueCell,
 } from '@affine/core/modules/doc-info/types';
-import { WorkbenchService } from '@affine/core/modules/workbench';
-import { ViewService } from '@affine/core/modules/workbench/services/view';
+import { FeatureFlagService } from '@affine/core/modules/feature-flag';
+import { ViewService, WorkbenchService } from '@affine/core/modules/workbench';
 import type { AffineDNDData } from '@affine/core/types/dnd';
 import { useI18n } from '@affine/i18n';
 import { track } from '@affine/track';
-import { PlusIcon, PropertyIcon, ToggleExpandIcon } from '@blocksuite/icons/rc';
+import { PlusIcon, PropertyIcon, ToggleDownIcon } from '@blocksuite/icons/rc';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import {
-  type DocCustomPropertyInfo,
-  DocService,
-  DocsService,
   useLiveData,
   useService,
   useServiceOptional,
 } from '@toeverything/infra';
 import clsx from 'clsx';
 import type React from 'react';
-import { forwardRef, useCallback, useState } from 'react';
+import { forwardRef, useCallback, useMemo, useState } from 'react';
 
 import { DocPropertyIcon } from './icons/doc-property-icon';
 import { CreatePropertyMenuItems } from './menu/create-doc-property';
@@ -44,14 +43,21 @@ export type DefaultOpenProperty =
     }
   | {
       type: 'database';
+      docId: string;
       databaseId: string;
       databaseRowId: string;
     };
 
 export interface DocPropertiesTableProps {
+  className?: string;
   defaultOpenProperty?: DefaultOpenProperty;
   onPropertyAdded?: (property: DocCustomPropertyInfo) => void;
   onPropertyChange?: (property: DocCustomPropertyInfo, value: unknown) => void;
+  onPropertyInfoChange?: (
+    property: DocCustomPropertyInfo,
+    field: keyof DocCustomPropertyInfo,
+    value: string
+  ) => void;
   onDatabasePropertyChange?: (
     row: DatabaseRow,
     cell: DatabaseValueCell,
@@ -89,7 +95,7 @@ export const DocPropertiesTableHeader = ({
           className={styles.tableHeaderCollapseButtonWrapper}
           data-testid="page-info-collapse"
         >
-          <ToggleExpandIcon
+          <ToggleDownIcon
             className={styles.collapsedIcon}
             data-collapsed={!open}
           />
@@ -106,18 +112,27 @@ interface DocPropertyRowProps {
   showAll?: boolean;
   defaultOpenEditMenu?: boolean;
   onChange?: (value: unknown) => void;
+  onPropertyInfoChange?: (
+    field: keyof DocCustomPropertyInfo,
+    value: string
+  ) => void;
 }
 
 export const DocPropertyRow = ({
   propertyInfo,
   defaultOpenEditMenu,
   onChange,
+  onPropertyInfoChange,
 }: DocPropertyRowProps) => {
   const t = useI18n();
   const docService = useService(DocService);
   const docsService = useService(DocsService);
+  const featureFlagService = useService(FeatureFlagService);
   const customPropertyValue = useLiveData(
     docService.doc.customProperty$(propertyInfo.id)
+  );
+  const enableTemplateDoc = useLiveData(
+    featureFlagService.flags.enable_template_doc.$
   );
   const typeInfo = isSupportedDocPropertyType(propertyInfo.type)
     ? DocPropertyTypes[propertyInfo.type]
@@ -130,11 +145,13 @@ export const DocPropertyRow = ({
     typeInfo && 'value' in typeInfo ? typeInfo.value : undefined;
 
   const handleChange = useCallback(
-    (value: any) => {
-      if (typeof value !== 'string') {
-        throw new Error('only allow string value');
+    (value: any, skipCommit?: boolean) => {
+      if (!skipCommit) {
+        if (typeof value !== 'string') {
+          throw new Error('only allow string value');
+        }
+        docService.doc.record.setCustomProperty(propertyInfo.id, value);
       }
-      docService.doc.record.setCustomProperty(propertyInfo.id, value);
       onChange?.(value);
     },
     [docService, onChange, propertyInfo]
@@ -191,6 +208,9 @@ export const DocPropertyRow = ({
   );
 
   if (!ValueRenderer || typeof ValueRenderer !== 'function') return null;
+  if (propertyInfo.id === 'template' && !enableTemplateDoc) {
+    return null;
+  }
 
   return (
     <PropertyRoot
@@ -211,7 +231,12 @@ export const DocPropertyRow = ({
           propertyInfo.name ||
           (typeInfo?.name ? t.t(typeInfo.name) : t['unnamed']())
         }
-        menuItems={<EditDocPropertyMenuItems propertyId={propertyInfo.id} />}
+        menuItems={
+          <EditDocPropertyMenuItems
+            propertyId={propertyInfo.id}
+            onPropertyInfoChange={onPropertyInfoChange}
+          />
+        }
         data-testid="doc-property-name"
       />
       <ValueRenderer
@@ -229,6 +254,11 @@ interface DocWorkspacePropertiesTableBodyProps {
   defaultOpen?: boolean;
   onChange?: (property: DocCustomPropertyInfo, value: unknown) => void;
   onPropertyAdded?: (property: DocCustomPropertyInfo) => void;
+  onPropertyInfoChange?: (
+    property: DocCustomPropertyInfo,
+    field: keyof DocCustomPropertyInfo,
+    value: string
+  ) => void;
 }
 
 // 🏷️ Tags     (⋅ xxx) (⋅ yyy)
@@ -239,7 +269,15 @@ const DocWorkspacePropertiesTableBody = forwardRef<
   DocWorkspacePropertiesTableBodyProps
 >(
   (
-    { className, style, defaultOpen, onChange, onPropertyAdded, ...props },
+    {
+      className,
+      style,
+      defaultOpen,
+      onChange,
+      onPropertyAdded,
+      onPropertyInfoChange,
+      ...props
+    },
     ref
   ) => {
     const t = useI18n();
@@ -247,7 +285,7 @@ const DocWorkspacePropertiesTableBody = forwardRef<
     const workbenchService = useService(WorkbenchService);
     const viewService = useServiceOptional(ViewService);
     const properties = useLiveData(docsService.propertyList.sortedProperties$);
-    const [propertyCollapsed, setPropertyCollapsed] = useState(true);
+    const [addMoreCollapsed, setAddMoreCollapsed] = useState(true);
 
     const [newPropertyId, setNewPropertyId] = useState<string | null>(null);
 
@@ -259,6 +297,10 @@ const DocWorkspacePropertiesTableBody = forwardRef<
       [onPropertyAdded]
     );
 
+    const handleCollapseChange = useCallback(() => {
+      setNewPropertyId(null);
+    }, []);
+
     return (
       <PropertyCollapsibleSection
         ref={ref}
@@ -266,12 +308,13 @@ const DocWorkspacePropertiesTableBody = forwardRef<
         style={style}
         title={t.t('com.affine.workspace.properties')}
         defaultCollapsed={!defaultOpen}
+        onCollapseChange={handleCollapseChange}
         {...props}
       >
         <PropertyCollapsibleContent
           collapsible
-          collapsed={propertyCollapsed}
-          onCollapseChange={setPropertyCollapsed}
+          collapsed={addMoreCollapsed}
+          onCollapseChange={setAddMoreCollapsed}
           className={styles.tableBodySortable}
           collapseButtonText={({ hide, isCollapsed }) =>
             isCollapsed
@@ -297,6 +340,9 @@ const DocWorkspacePropertiesTableBody = forwardRef<
               propertyInfo={property}
               defaultOpenEditMenu={newPropertyId === property.id}
               onChange={value => onChange?.(property, value)}
+              onPropertyInfoChange={(...args) =>
+                onPropertyInfoChange?.(property, ...args)
+              }
             />
           ))}
           <div className={styles.actionContainer}>
@@ -350,17 +396,30 @@ const DocPropertiesTableInner = ({
   defaultOpenProperty,
   onPropertyAdded,
   onPropertyChange,
+  onPropertyInfoChange,
   onDatabasePropertyChange,
+  className,
 }: DocPropertiesTableProps) => {
   const [expanded, setExpanded] = useState(!!defaultOpenProperty);
+  const defaultOpen = useMemo(() => {
+    return defaultOpenProperty?.type === 'database'
+      ? [
+          {
+            databaseBlockId: defaultOpenProperty.databaseId,
+            rowId: defaultOpenProperty.databaseRowId,
+            docId: defaultOpenProperty.docId,
+          },
+        ]
+      : [];
+  }, [defaultOpenProperty]);
   return (
-    <div className={styles.root}>
-      <Collapsible.Root
-        open={expanded}
-        onOpenChange={setExpanded}
-        className={styles.rootCentered}
-      >
-        <DocPropertiesTableHeader open={expanded} onOpenChange={setExpanded} />
+    <div className={clsx(styles.root, className)}>
+      <Collapsible.Root open={expanded} onOpenChange={setExpanded}>
+        <DocPropertiesTableHeader
+          style={{ width: '100%' }}
+          open={expanded}
+          onOpenChange={setExpanded}
+        />
         <Collapsible.Content>
           <DocWorkspacePropertiesTableBody
             defaultOpen={
@@ -368,20 +427,12 @@ const DocPropertiesTableInner = ({
             }
             onPropertyAdded={onPropertyAdded}
             onChange={onPropertyChange}
+            onPropertyInfoChange={onPropertyInfoChange}
           />
           <div className={styles.tableHeaderDivider} />
           <DocDatabaseBacklinkInfo
             onChange={onDatabasePropertyChange}
-            defaultOpen={
-              defaultOpenProperty?.type === 'database'
-                ? [
-                    {
-                      databaseId: defaultOpenProperty.databaseId,
-                      rowId: defaultOpenProperty.databaseRowId,
-                    },
-                  ]
-                : []
-            }
+            defaultOpen={defaultOpen}
           />
         </Collapsible.Content>
       </Collapsible.Root>

@@ -1,7 +1,7 @@
 import { ChatHistoryOrder } from '@affine/graphql';
-import type {
+import {
   BlockSelection,
-  EditorHost,
+  type EditorHost,
   TextSelection,
 } from '@blocksuite/affine/block-std';
 import type {
@@ -24,10 +24,10 @@ import {
   getCommonBoundWithRotation,
   type SerializedXYWH,
 } from '@blocksuite/affine/global/utils';
-import type { Doc } from '@blocksuite/affine/store';
-import type { ChatMessage } from '@toeverything/infra/blocksuite';
+import type { Store } from '@blocksuite/affine/store';
 import type { TemplateResult } from 'lit';
 
+import type { ChatMessage } from '../../../blocks';
 import { insertFromMarkdown } from '../../_common';
 import { AIProvider, type AIUserInfo } from '../provider';
 import { reportResponse } from '../utils/action-reporter';
@@ -101,13 +101,13 @@ export function constructUserInfoWithMessages(
 }
 
 export async function constructRootChatBlockMessages(
-  doc: Doc,
+  doc: Store,
   forkSessionId: string
 ) {
   // Convert chat messages to AI chat block messages
   const userInfo = await AIProvider.userInfo;
   const forkMessages = await queryHistoryMessages(
-    doc.collection.id,
+    doc.workspace.id,
     doc.id,
     forkSessionId
   );
@@ -152,7 +152,7 @@ function addAIChatBlock(
 
   const { doc } = host;
   const surfaceBlock = doc
-    .getBlocks()
+    .getStore()
     .find(block => block.flavour === 'affine:surface');
   if (!surfaceBlock) {
     return;
@@ -171,7 +171,7 @@ function addAIChatBlock(
       messages: JSON.stringify(messages),
       index,
       sessionId,
-      rootWorkspaceId: doc.collection.id,
+      rootWorkspaceId: doc.workspace.id,
       rootDocId: doc.id,
     },
     surfaceBlock.id
@@ -198,8 +198,8 @@ const REPLACE_SELECTION = {
   icon: ReplaceIcon,
   title: 'Replace selection',
   showWhen: (host: EditorHost) => {
-    const textSelection = host.selection.find('text');
-    const blockSelections = host.selection.filter('block');
+    const textSelection = host.selection.find(TextSelection);
+    const blockSelections = host.selection.filter(BlockSelection);
     if (
       (!textSelection || textSelection.from.length === 0) &&
       blockSelections?.length === 0
@@ -330,7 +330,7 @@ const SAVE_CHAT_TO_BLOCK_ACTION: ChatAction = {
 
     try {
       const newSessionId = await AIProvider.forkChat?.({
-        workspaceId: host.doc.collection.id,
+        workspaceId: host.doc.workspace.id,
         docId: host.doc.id,
         sessionId: parentSessionId,
         latestMessageId: messageId,
@@ -425,7 +425,7 @@ const CREATE_AS_DOC = {
   toast: 'New doc created',
   handler: (host: EditorHost, content: string) => {
     reportResponse('result:add-page');
-    const newDoc = host.doc.collection.createDoc();
+    const newDoc = host.doc.workspace.createDoc();
     newDoc.load();
     const rootId = newDoc.addBlock('affine:page');
     newDoc.addBlock('affine:surface', {}, rootId);
@@ -433,6 +433,7 @@ const CREATE_AS_DOC = {
 
     host.std.getOptional(RefNodeSlotsProvider)?.docLinkClicked.emit({
       pageId: newDoc.id,
+      host,
     });
     let complete = false;
     (function addContent() {
@@ -462,7 +463,7 @@ const CREATE_AS_LINKED_DOC = {
 
     const { doc } = host;
     const surfaceBlock = doc
-      .getBlocks()
+      .getStore()
       .find(block => block.flavour === 'affine:surface');
     if (!surfaceBlock) {
       return false;
@@ -479,7 +480,7 @@ const CREATE_AS_LINKED_DOC = {
     }
 
     // Create a new doc and add the content to it
-    const newDoc = host.doc.collection.createDoc();
+    const newDoc = host.doc.workspace.createDoc();
     newDoc.load();
     const rootId = newDoc.addBlock('affine:page');
     newDoc.addBlock('affine:surface', {}, rootId);
@@ -508,7 +509,7 @@ const CREATE_AS_LINKED_DOC = {
       y = viewportCenter.y - height / 2;
     }
 
-    service.addBlock(
+    service.crud.addBlock(
       'affine:embed-linked-doc',
       {
         xywh: `[${x}, ${y}, ${width}, ${height}]`,

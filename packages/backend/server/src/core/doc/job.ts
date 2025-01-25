@@ -8,13 +8,13 @@ import {
   type EventPayload,
   metrics,
   OnEvent,
-} from '../../fundamentals';
+} from '../../base';
 import { PgWorkspaceDocStorageAdapter } from './adapters/workspace';
 
 @Injectable()
 export class DocStorageCronJob implements OnModuleInit {
-  private readonly logger = new Logger(DocStorageCronJob.name);
   private busy = false;
+  private readonly logger = new Logger(DocStorageCronJob.name);
 
   constructor(
     private readonly config: Config,

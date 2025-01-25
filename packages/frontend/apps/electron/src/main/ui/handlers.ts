@@ -1,6 +1,7 @@
-import { app, nativeTheme, shell } from 'electron';
+import { app, clipboard, nativeImage, nativeTheme, shell } from 'electron';
 import { getLinkPreview } from 'link-preview-js';
 
+import { isMacOS } from '../../shared/utils';
 import { persistentConfig } from '../config-storage/persist';
 import { logger } from '../logger';
 import type { WorkbenchViewMeta } from '../shared-state-schema';
@@ -70,6 +71,10 @@ export const uiHandlers = {
   handleCloseApp: async () => {
     app.quit();
   },
+  handleHideApp: async () => {
+    const window = await getMainWindow();
+    window?.hide();
+  },
   handleNetworkChange: async (_, _isOnline: boolean) => {
     isOnline = _isOnline;
   },
@@ -105,7 +110,7 @@ export const uiHandlers = {
       link =
         'https://api.fxtwitter.com/status/' + /\/status\/(.*)/.exec(link)?.[1];
       try {
-        const { tweet } = await fetch(link).then(res => res.json());
+        const { tweet } = (await fetch(link).then(res => res.json())) as any;
         return {
           title: tweet.author.name,
           icon: tweet.author.avatar_url,
@@ -190,6 +195,7 @@ export const uiHandlers = {
   closeTab: async (_, ...args: Parameters<typeof closeTab>) => {
     await closeTab(...args);
   },
+
   activateView: async (_, ...args: Parameters<typeof activateView>) => {
     await activateView(...args);
   },
@@ -219,5 +225,35 @@ export const uiHandlers = {
   restartApp: async () => {
     app.relaunch();
     app.quit();
+  },
+  onLanguageChange: async (e, language: string) => {
+    // only works for win/linux
+    // see https://www.electronjs.org/docs/latest/tutorial/spellchecker#how-to-set-the-languages-the-spellchecker-uses
+    if (isMacOS()) {
+      return;
+    }
+
+    if (e.sender.session.availableSpellCheckerLanguages.includes(language)) {
+      e.sender.session.setSpellCheckerLanguages([language, 'en-US']);
+    }
+  },
+  captureArea: async (e, { x, y, width, height }: Electron.Rectangle) => {
+    const image = await e.sender.capturePage({
+      x: Math.floor(x),
+      y: Math.floor(y),
+      width: Math.floor(width),
+      height: Math.floor(height),
+    });
+
+    if (image.isEmpty()) {
+      throw new Error('Image is empty or invalid');
+    }
+
+    const buffer = image.toPNG();
+    if (!buffer || !buffer.length) {
+      throw new Error('Failed to generate PNG buffer from image');
+    }
+
+    clipboard.writeImage(nativeImage.createFromBuffer(buffer));
   },
 } satisfies NamespaceHandlers;

@@ -8,23 +8,32 @@ import { SyncAwareness } from '@affine/core/components/affine/awareness';
 import { useRegisterFindInPageCommands } from '@affine/core/components/hooks/affine/use-register-find-in-page-commands';
 import { useRegisterWorkspaceCommands } from '@affine/core/components/hooks/use-register-workspace-commands';
 import { OverCapacityNotification } from '@affine/core/components/over-capacity';
-import { GlobalDialogService } from '@affine/core/modules/dialogs';
+import { AINetworkSearchService } from '@affine/core/modules/ai-button/services/network-search';
+import {
+  EventSourceService,
+  FetchService,
+  GraphQLService,
+} from '@affine/core/modules/cloud';
+import {
+  GlobalDialogService,
+  WorkspaceDialogService,
+} from '@affine/core/modules/dialogs';
+import { DocsService } from '@affine/core/modules/doc';
 import { EditorSettingService } from '@affine/core/modules/editor-setting';
 import { useRegisterNavigationCommands } from '@affine/core/modules/navigation/view/use-register-navigation-commands';
 import { QuickSearchContainer } from '@affine/core/modules/quicksearch';
 import { WorkbenchService } from '@affine/core/modules/workbench';
+import { WorkspaceService } from '@affine/core/modules/workspace';
 import { useI18n } from '@affine/i18n';
 import track from '@affine/track';
 import { type DocMode, ZipTransformer } from '@blocksuite/affine/blocks';
 import {
-  DocsService,
   effect,
   fromPromise,
   onStart,
   throwIfAborted,
   useService,
   useServices,
-  WorkspaceService,
 } from '@toeverything/infra';
 import { useSetAtom } from 'jotai';
 import { useEffect } from 'react';
@@ -36,7 +45,9 @@ import {
   switchMap,
   timeout,
 } from 'rxjs';
-import { Map as YMap } from 'yjs';
+
+import { CopilotClient } from '../blocksuite/block-suite-editor/ai/copilot-client';
+import { setupAIProvider } from '../blocksuite/block-suite-editor/ai/setup-provider';
 
 /**
  * @deprecated just for legacy code, will be removed in the future
@@ -115,11 +126,12 @@ export const WorkspaceSideEffects = () => {
     workbench,
   ]);
 
+  const workspaceDialogService = useService(WorkspaceDialogService);
   const globalDialogService = useService(GlobalDialogService);
 
   useEffect(() => {
     const disposable = AIProvider.slots.requestUpgradePlan.on(() => {
-      globalDialogService.open('setting', {
+      workspaceDialogService.open('setting', {
         activeTab: 'billing',
       });
       track.$.paywall.aiAction.viewPlans();
@@ -127,32 +139,38 @@ export const WorkspaceSideEffects = () => {
     return () => {
       disposable.dispose();
     };
-  }, [globalDialogService]);
+  }, [workspaceDialogService]);
+
+  const graphqlService = useService(GraphQLService);
+  const eventSourceService = useService(EventSourceService);
+  const fetchService = useService(FetchService);
+  const networkSearchService = useService(AINetworkSearchService);
+
+  useEffect(() => {
+    const dispose = setupAIProvider(
+      new CopilotClient(
+        graphqlService.gql,
+        fetchService.fetch,
+        eventSourceService.eventSource
+      ),
+      globalDialogService,
+      networkSearchService
+    );
+    return () => {
+      dispose();
+    };
+  }, [
+    eventSourceService,
+    fetchService,
+    workspaceDialogService,
+    graphqlService,
+    networkSearchService,
+    globalDialogService,
+  ]);
 
   useRegisterWorkspaceCommands();
   useRegisterNavigationCommands();
   useRegisterFindInPageCommands();
-
-  useEffect(() => {
-    // hotfix for blockVersions
-    // this is a mistake in the
-    //    0.8.0 ~ 0.8.1
-    //    0.8.0-beta.0 ~ 0.8.0-beta.3
-    //    0.8.0-canary.17 ~ 0.9.0-canary.3
-    const meta = currentWorkspace.docCollection.doc.getMap('meta');
-    const blockVersions = meta.get('blockVersions');
-    if (
-      !(blockVersions instanceof YMap) &&
-      blockVersions !== null &&
-      blockVersions !== undefined &&
-      typeof blockVersions === 'object'
-    ) {
-      meta.set(
-        'blockVersions',
-        new YMap(Object.entries(blockVersions as Record<string, number>))
-      );
-    }
-  }, [currentWorkspace.docCollection.doc]);
 
   return (
     <>

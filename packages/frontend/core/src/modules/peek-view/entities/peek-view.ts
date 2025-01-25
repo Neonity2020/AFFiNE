@@ -1,5 +1,6 @@
 import type { BlockComponent, EditorHost } from '@blocksuite/affine/block-std';
 import type {
+  AttachmentBlockModel,
   DocMode,
   EmbedLinkedDocModel,
   EmbedSyncedDocModel,
@@ -8,12 +9,12 @@ import type {
   SurfaceRefBlockModel,
 } from '@blocksuite/affine/blocks';
 import { AffineReference } from '@blocksuite/affine/blocks';
-import type { BlockModel } from '@blocksuite/affine/store';
-import type { AIChatBlockModel } from '@toeverything/infra';
+import type { Block, BlockModel } from '@blocksuite/affine/store';
 import { Entity, LiveData } from '@toeverything/infra';
 import type { TemplateResult } from 'lit';
 import { firstValueFrom, map, race } from 'rxjs';
 
+import type { AIChatBlockModel } from '../../../blocksuite/blocks';
 import { resolveLinkToDoc } from '../../navigation';
 import type { WorkbenchService } from '../../workbench';
 
@@ -23,6 +24,7 @@ export type DocReferenceInfo = {
   blockIds?: string[];
   elementIds?: string[];
   databaseId?: string;
+  databaseDocId?: string;
   databaseRowId?: string;
   /**
    * viewport in edgeless mode
@@ -34,7 +36,8 @@ export type PeekViewElement =
   | HTMLElement
   | BlockComponent
   | AffineReference
-  | HTMLAnchorElement;
+  | HTMLAnchorElement
+  | Block;
 
 export interface PeekViewTarget {
   element?: PeekViewElement;
@@ -49,6 +52,11 @@ export interface DocPeekViewInfo {
 export type ImagePeekViewInfo = {
   type: 'image';
   docRef: DocReferenceInfo;
+};
+
+export type AttachmentPeekViewInfo = {
+  type: 'attachment';
+  docRef: DocReferenceInfo & { filetype?: string };
 };
 
 export type AIChatBlockPeekViewInfo = {
@@ -68,6 +76,7 @@ export type ActivePeekView = {
   info:
     | DocPeekViewInfo
     | ImagePeekViewInfo
+    | AttachmentPeekViewInfo
     | CustomTemplatePeekViewInfo
     | AIChatBlockPeekViewInfo;
 };
@@ -88,6 +97,12 @@ const isImageBlockModel = (
   blockModel: BlockModel
 ): blockModel is ImageBlockModel => {
   return blockModel.flavour === 'affine:image';
+};
+
+const isAttachmentBlockModel = (
+  blockModel: BlockModel
+): blockModel is AttachmentBlockModel => {
+  return blockModel.flavour === 'affine:attachment';
 };
 
 const isSurfaceRefModel = (
@@ -119,34 +134,25 @@ function resolvePeekInfoFromPeekTarget(
     if (element instanceof AffineReference) {
       const referenceInfo = element.referenceInfo;
       if (referenceInfo) {
-        const { pageId: docId } = referenceInfo;
+        const { pageId: docId, params } = referenceInfo;
         const info: DocPeekViewInfo = {
           type: 'doc',
-          docRef: {
-            docId,
-          },
+          docRef: { docId, ...params },
         };
-        Object.assign(info, referenceInfo.params);
         return info;
       }
     } else if ('model' in element) {
       const blockModel = element.model;
-      if (isEmbedLinkedDocModel(blockModel)) {
+      if (
+        isEmbedLinkedDocModel(blockModel) ||
+        isEmbedSyncedDocModel(blockModel)
+      ) {
+        const { pageId: docId, params } = blockModel;
         const info: DocPeekViewInfo = {
           type: 'doc',
-          docRef: {
-            docId: blockModel.pageId,
-          },
+          docRef: { docId, ...params },
         };
-        Object.assign(info, blockModel.params);
         return info;
-      } else if (isEmbedSyncedDocModel(blockModel)) {
-        return {
-          type: 'doc',
-          docRef: {
-            docId: blockModel.pageId,
-          },
-        };
       } else if (isSurfaceRefModel(blockModel)) {
         const refModel = (element as SurfaceRefBlockComponent).referenceModel;
         // refModel can be null if the reference is invalid
@@ -162,6 +168,15 @@ function resolvePeekInfoFromPeekTarget(
             },
           };
         }
+      } else if (isAttachmentBlockModel(blockModel)) {
+        return {
+          type: 'attachment',
+          docRef: {
+            docId: blockModel.doc.id,
+            blockIds: [blockModel.id],
+            filetype: blockModel.type,
+          },
+        };
       } else if (isImageBlockModel(blockModel)) {
         return {
           type: 'image',
@@ -170,7 +185,7 @@ function resolvePeekInfoFromPeekTarget(
             blockIds: [blockModel.id],
           },
         };
-      } else if (isAIChatBlockModel(blockModel)) {
+      } else if (isAIChatBlockModel(blockModel) && 'host' in element) {
         return {
           type: 'ai-chat-block',
           docRef: {
@@ -208,10 +223,10 @@ export type PeekViewMode = 'full' | 'fit' | 'max';
 export class PeekViewEntity extends Entity {
   private readonly _active$ = new LiveData<ActivePeekView | null>(null);
   private readonly _show$ = new LiveData<{
-    animation: PeekViewAnimation;
+    animation: boolean;
     value: boolean;
   }>({
-    animation: 'zoom',
+    animation: true,
     value: false,
   });
 
@@ -246,10 +261,7 @@ export class PeekViewEntity extends Entity {
     this._active$.next({ target, info: resolvedInfo });
     this._show$.next({
       value: true,
-      animation:
-        resolvedInfo.type === 'doc' || resolvedInfo.type === 'ai-chat-block'
-          ? 'zoom'
-          : 'fade',
+      animation: true,
     });
 
     if (abortSignal) {
@@ -272,10 +284,10 @@ export class PeekViewEntity extends Entity {
     return firstValueFrom(race(this._active$, this.show$).pipe(map(() => {})));
   };
 
-  close = (animation?: PeekViewAnimation) => {
+  close = (animation = true) => {
     this._show$.next({
       value: false,
-      animation: animation ?? this._show$.value.animation,
+      animation,
     });
   };
 }

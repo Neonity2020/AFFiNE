@@ -1,23 +1,21 @@
 import { AffineContext } from '@affine/core/components/context';
-import { AppFallback } from '@affine/core/mobile/components';
+import { AppFallback } from '@affine/core/mobile/components/app-fallback';
 import { configureMobileModules } from '@affine/core/mobile/modules';
+import { HapticProvider } from '@affine/core/mobile/modules/haptics';
 import { router } from '@affine/core/mobile/router';
 import { configureCommonModules } from '@affine/core/modules';
 import { I18nProvider } from '@affine/core/modules/i18n';
-import { configureLocalStorageStateStorageImpls } from '@affine/core/modules/storage';
+import { LifecycleService } from '@affine/core/modules/lifecycle';
+import {
+  configureLocalStorageStateStorageImpls,
+  NbstoreProvider,
+} from '@affine/core/modules/storage';
 import { PopupWindowProvider } from '@affine/core/modules/url';
-import { configureIndexedDBUserspaceStorageProvider } from '@affine/core/modules/userspace';
 import { configureBrowserWorkbenchModule } from '@affine/core/modules/workbench';
-import {
-  configureBrowserWorkspaceFlavours,
-  configureIndexedDBWorkspaceEngineStorageProvider,
-} from '@affine/core/modules/workspace-engine';
-import {
-  Framework,
-  FrameworkRoot,
-  getCurrentStore,
-  LifecycleService,
-} from '@toeverything/infra';
+import { configureBrowserWorkspaceFlavours } from '@affine/core/modules/workspace-engine';
+import { WorkerClient } from '@affine/nbstore/worker/client';
+import { Framework, FrameworkRoot, getCurrentStore } from '@toeverything/infra';
+import { OpClient } from '@toeverything/infra/op';
 import { Suspense } from 'react';
 import { RouterProvider } from 'react-router-dom';
 
@@ -30,9 +28,43 @@ configureCommonModules(framework);
 configureBrowserWorkbenchModule(framework);
 configureLocalStorageStateStorageImpls(framework);
 configureBrowserWorkspaceFlavours(framework);
-configureIndexedDBWorkspaceEngineStorageProvider(framework);
-configureIndexedDBUserspaceStorageProvider(framework);
 configureMobileModules(framework);
+framework.impl(NbstoreProvider, {
+  openStore(key, options) {
+    if (window.SharedWorker) {
+      const worker = new SharedWorker(
+        new URL(
+          /* webpackChunkName: "nbstore" */ './nbstore.ts',
+          import.meta.url
+        ),
+        { name: key }
+      );
+      const client = new WorkerClient(new OpClient(worker.port), options);
+      worker.port.start();
+      return {
+        store: client,
+        dispose: () => {
+          worker.port.postMessage({ type: '__close__' });
+          worker.port.close();
+        },
+      };
+    } else {
+      const worker = new Worker(
+        new URL(
+          /* webpackChunkName: "nbstore" */ './nbstore.ts',
+          import.meta.url
+        )
+      );
+      const client = new WorkerClient(new OpClient(worker), options);
+      return {
+        store: client,
+        dispose: () => {
+          worker.terminate();
+        },
+      };
+    }
+  },
+});
 framework.impl(PopupWindowProvider, {
   open: (target: string) => {
     const targetUrl = new URL(target);
@@ -51,6 +83,28 @@ framework.impl(PopupWindowProvider, {
     }
     window.open(url, '_blank', 'noreferrer noopener');
   },
+});
+framework.impl(HapticProvider, {
+  impact: options => {
+    return new Promise(resolve => {
+      const style = options?.style ?? 'LIGHT';
+      const pattern = {
+        LIGHT: [10],
+        MEDIUM: [20],
+        HEAVY: [30],
+      }[style];
+      const result = navigator.vibrate?.(pattern);
+      if (!result) {
+        console.warn('vibrate not supported, or user not interacted');
+      }
+      resolve();
+    });
+  },
+  notification: () => Promise.reject('Not supported'),
+  vibrate: () => Promise.reject('Not supported'),
+  selectionStart: () => Promise.reject('Not supported'),
+  selectionChanged: () => Promise.reject('Not supported'),
+  selectionEnd: () => Promise.reject('Not supported'),
 });
 const frameworkProvider = framework.provider();
 

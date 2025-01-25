@@ -1,13 +1,14 @@
-import { IconButton, SafeArea } from '@affine/component';
-import { ArrowLeftSmallIcon } from '@blocksuite/icons/rc';
+import { SafeArea } from '@affine/component';
 import clsx from 'clsx';
-import {
-  forwardRef,
-  type HtmlHTMLAttributes,
-  type ReactNode,
-  useCallback,
+import type {
+  HtmlHTMLAttributes,
+  ReactElement,
+  ReactNode,
+  SVGAttributes,
 } from 'react';
+import { forwardRef } from 'react';
 
+import { NavigationBackButton } from '../navigation-back';
 import * as styles from './styles.css';
 
 export interface PageHeaderProps
@@ -16,6 +17,7 @@ export interface PageHeaderProps
    * whether to show back button
    */
   back?: boolean;
+  backIcon?: ReactElement<SVGAttributes<SVGElement>>;
   /**
    * Override back button action
    */
@@ -36,34 +38,44 @@ export interface PageHeaderProps
    * @default true
    */
   centerContent?: boolean;
+  contentClassName?: string;
 
   prefixClassName?: string;
   prefixStyle?: React.CSSProperties;
   suffixClassName?: string;
   suffixStyle?: React.CSSProperties;
+
+  /**
+   * Custom bottom content
+   */
+  bottom?: ReactNode;
+  /**
+   * Bottom Spacer height
+   */
+  bottomSpacer?: number;
 }
 export const PageHeader = forwardRef<HTMLDivElement, PageHeaderProps>(
   function PageHeader(
     {
       back,
+      backIcon,
       backAction,
       prefix,
       suffix,
       children,
       className,
       centerContent = true,
+      contentClassName,
       prefixClassName,
       prefixStyle,
       suffixClassName,
       suffixStyle,
+      bottom,
+      bottomSpacer,
       ...attrs
     },
     ref
   ) {
-    const handleRouteBack = useCallback(() => {
-      backAction ? backAction() : history.back();
-    }, [backAction]);
-
     return (
       <>
         <SafeArea
@@ -79,19 +91,15 @@ export const PageHeader = forwardRef<HTMLDivElement, PageHeaderProps>(
               style={prefixStyle}
             >
               {back ? (
-                <IconButton
-                  size={24}
-                  style={{ padding: 10 }}
-                  onClick={handleRouteBack}
-                  icon={<ArrowLeftSmallIcon />}
-                  data-testid="page-header-back"
-                />
+                <NavigationBackButton icon={backIcon} backAction={backAction} />
               ) : null}
               {prefix}
             </section>
 
             <section
-              className={clsx(styles.content, { center: centerContent })}
+              className={clsx(styles.content, contentClassName, {
+                center: centerContent,
+              })}
             >
               {children}
             </section>
@@ -103,11 +111,13 @@ export const PageHeader = forwardRef<HTMLDivElement, PageHeaderProps>(
               {suffix}
             </section>
           </header>
+          {bottom}
         </SafeArea>
 
         {/* Spacer */}
         <SafeArea top>
           <div className={styles.headerSpacer} />
+          {bottom ? <div style={{ height: bottomSpacer ?? 0 }} /> : null}
         </SafeArea>
       </>
     );

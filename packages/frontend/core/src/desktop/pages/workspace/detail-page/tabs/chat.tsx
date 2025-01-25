@@ -1,11 +1,16 @@
 import { ChatPanel } from '@affine/core/blocksuite/presets/ai';
+import { AINetworkSearchService } from '@affine/core/modules/ai-button/services/network-search';
+import { DocDisplayMetaService } from '@affine/core/modules/doc-display-meta';
+import { DocSearchMenuService } from '@affine/core/modules/doc-search-menu/services';
+import { WorkspaceService } from '@affine/core/modules/workspace';
 import {
+  createSignalFromObservable,
   DocModeProvider,
   RefNodeSlotsProvider,
 } from '@blocksuite/affine/blocks';
-import { assertExists } from '@blocksuite/affine/global/utils';
 import type { AffineEditorContainer } from '@blocksuite/affine/presets';
-import { forwardRef, useCallback, useEffect, useRef } from 'react';
+import { useFramework } from '@toeverything/infra';
+import { forwardRef, useEffect, useRef } from 'react';
 
 import * as styles from './chat.css';
 
@@ -20,13 +25,8 @@ export const EditorChatPanel = forwardRef(function EditorChatPanel(
   ref: React.ForwardedRef<ChatPanel>
 ) {
   const chatPanelRef = useRef<ChatPanel | null>(null);
-
-  const onRefChange = useCallback((container: HTMLDivElement | null) => {
-    if (container) {
-      assertExists(chatPanelRef.current, 'chat panel should be initialized');
-      container.append(chatPanelRef.current);
-    }
-  }, []);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const framework = useFramework();
 
   useEffect(() => {
     if (onLoad && chatPanelRef.current) {
@@ -45,40 +45,65 @@ export const EditorChatPanel = forwardRef(function EditorChatPanel(
   }, [onLoad, ref]);
 
   useEffect(() => {
-    if (!editor) return;
-    const pageService = editor.host?.std.getService('affine:page');
-    if (!pageService) return;
-    const docModeService = editor.host?.std.get(DocModeProvider);
-    const refNodeService = editor.host?.std.getOptional(RefNodeSlotsProvider);
+    if (!editor || !editor.host) return;
 
+    if (!chatPanelRef.current) {
+      chatPanelRef.current = new ChatPanel();
+      chatPanelRef.current.host = editor.host;
+      chatPanelRef.current.doc = editor.doc;
+      containerRef.current?.append(chatPanelRef.current);
+      const searchService = framework.get(AINetworkSearchService);
+      const docDisplayMetaService = framework.get(DocDisplayMetaService);
+      const workspaceService = framework.get(WorkspaceService);
+      const docSearchMenuService = framework.get(DocSearchMenuService);
+      chatPanelRef.current.networkSearchConfig = {
+        visible: searchService.visible,
+        enabled: searchService.enabled,
+        setEnabled: searchService.setEnabled,
+      };
+      chatPanelRef.current.docDisplayConfig = {
+        getIcon: (docId: string) => {
+          return docDisplayMetaService.icon$(docId, { type: 'lit' }).value;
+        },
+        getTitle: (docId: string) => {
+          const title$ = docDisplayMetaService.title$(docId);
+          return createSignalFromObservable(title$, '');
+        },
+        getDoc: (docId: string) => {
+          const doc = workspaceService.workspace.docCollection.getDoc(docId);
+          return doc;
+        },
+      };
+      chatPanelRef.current.docSearchMenuConfig = {
+        getDocMenuGroup: (query, action, abortSignal) => {
+          return docSearchMenuService.getDocMenuGroup(
+            query,
+            action,
+            abortSignal
+          );
+        },
+      };
+    } else {
+      chatPanelRef.current.host = editor.host;
+      chatPanelRef.current.doc = editor.doc;
+    }
+
+    const docModeService = editor.host.std.get(DocModeProvider);
+    const refNodeService = editor.host.std.getOptional(RefNodeSlotsProvider);
     const disposable = [
-      refNodeService &&
-        refNodeService.docLinkClicked.on(() => {
+      refNodeService?.docLinkClicked.on(({ host }) => {
+        if (host === editor.host) {
           (chatPanelRef.current as ChatPanel).doc = editor.doc;
-        }),
-      docModeService &&
-        docModeService.onPrimaryModeChange(() => {
-          if (!editor.host) return;
-          (chatPanelRef.current as ChatPanel).host = editor.host;
-        }, editor.doc.id),
+        }
+      }),
+      docModeService?.onPrimaryModeChange(() => {
+        if (!editor.host) return;
+        (chatPanelRef.current as ChatPanel).host = editor.host;
+      }, editor.doc.id),
     ];
 
     return () => disposable.forEach(d => d?.dispose());
-  }, [editor]);
+  }, [editor, framework]);
 
-  if (!editor) {
-    return;
-  }
-
-  if (!chatPanelRef.current) {
-    chatPanelRef.current = new ChatPanel();
-  }
-
-  if (editor.host) {
-    (chatPanelRef.current as ChatPanel).host = editor.host;
-  }
-  (chatPanelRef.current as ChatPanel).doc = editor.doc;
-  // (copilotPanelRef.current as CopilotPanel).fitPadding = [20, 20, 20, 20];
-
-  return <div className={styles.root} ref={onRefChange} />;
+  return <div className={styles.root} ref={containerRef} />;
 });

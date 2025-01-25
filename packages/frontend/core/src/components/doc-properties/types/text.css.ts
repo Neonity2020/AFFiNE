@@ -25,6 +25,32 @@ export const textarea = style({
   },
 });
 
+export const mobileTextareaWrapper = style({
+  position: 'relative',
+  background: cssVarV2('layer/background/primary'),
+  borderRadius: 12,
+});
+
+const mobileTextareaBase = {
+  fontSize: 17,
+  lineHeight: '26px',
+  padding: 12,
+};
+
+export const mobileTextareaPlain = style([
+  textarea,
+  mobileTextareaBase,
+  {
+    position: 'relative',
+    fontSize: 14,
+    lineHeight: '22px',
+    height: 'auto',
+    padding: 0,
+  },
+]);
+
+export const mobileTextarea = style([textarea, mobileTextareaBase]);
+
 export const textPropertyValueContainer = style({
   outline: `1px solid transparent`,
   padding: `6px`,
@@ -44,3 +70,5 @@ export const textInvisible = style({
   fontSize: cssVar('fontSm'),
   lineHeight: '22px',
 });
+
+export const mobileTextInvisible = style([textInvisible, mobileTextareaBase]);

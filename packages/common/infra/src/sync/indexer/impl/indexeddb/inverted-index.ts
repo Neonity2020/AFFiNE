@@ -64,7 +64,7 @@ export class StringInvertedIndex implements InvertedIndex {
 
   async insert(trx: DataStructRWTransaction, id: number, terms: string[]) {
     for (const term of terms) {
-      await trx.objectStore('invertedIndex').add({
+      await trx.objectStore('invertedIndex').put({
         key: InvertedIndexKey.forString(this.fieldKey, term).buffer(),
         nid: id,
       });
@@ -117,7 +117,7 @@ export class IntegerInvertedIndex implements InvertedIndex {
 
   async insert(trx: DataStructRWTransaction, id: number, terms: string[]) {
     for (const term of terms) {
-      await trx.objectStore('invertedIndex').add({
+      await trx.objectStore('invertedIndex').put({
         key: InvertedIndexKey.forInt64(this.fieldKey, BigInt(term)).buffer(),
         nid: id,
       });
@@ -172,7 +172,7 @@ export class BooleanInvertedIndex implements InvertedIndex {
 
   async insert(trx: DataStructRWTransaction, id: number, terms: string[]) {
     for (const term of terms) {
-      await trx.objectStore('invertedIndex').add({
+      await trx.objectStore('invertedIndex').put({
         key: InvertedIndexKey.forBoolean(
           this.fieldKey,
           term === 'true'
@@ -347,7 +347,7 @@ export class FullTextInvertedIndex implements InvertedIndex {
       }
 
       for (const [term, tokens] of tokenMap) {
-        await trx.objectStore('invertedIndex').add({
+        await trx.objectStore('invertedIndex').put({
           key: InvertedIndexKey.forString(this.fieldKey, term).buffer(),
           nid: id,
           pos: {
@@ -386,9 +386,9 @@ export class FullTextInvertedIndex implements InvertedIndex {
 
 export class InvertedIndexKey {
   constructor(
-    readonly field: ArrayBuffer,
-    readonly value: ArrayBuffer,
-    readonly gap: ArrayBuffer = new Uint8Array([58])
+    readonly field: Uint8Array,
+    readonly value: Uint8Array,
+    readonly gap: Uint8Array = new Uint8Array([58])
   ) {}
 
   asString() {
@@ -396,7 +396,10 @@ export class InvertedIndexKey {
   }
 
   asInt64() {
-    return new DataView(this.value).getBigInt64(0, false); /* big-endian */
+    return new DataView(this.value.buffer).getBigInt64(
+      0,
+      false
+    ); /* big-endian */
   }
 
   add1() {
@@ -412,7 +415,7 @@ export class InvertedIndexKey {
     } else {
       return new InvertedIndexKey(
         this.field,
-        new ArrayBuffer(0),
+        new Uint8Array(0),
         new Uint8Array([59])
       );
     }
@@ -421,7 +424,7 @@ export class InvertedIndexKey {
   static forPrefix(field: string) {
     return new InvertedIndexKey(
       new TextEncoder().encode(field),
-      new ArrayBuffer(0)
+      new Uint8Array(0)
     );
   }
 
@@ -439,8 +442,8 @@ export class InvertedIndexKey {
   }
 
   static forInt64(field: string, value: bigint) {
-    const bytes = new ArrayBuffer(8);
-    new DataView(bytes).setBigInt64(0, value, false); /* big-endian */
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigInt64(0, value, false); /* big-endian */
     return new InvertedIndexKey(new TextEncoder().encode(field), bytes);
   }
 

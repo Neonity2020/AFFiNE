@@ -26,7 +26,7 @@ type NavigationEvents =
   | 'open'
   | 'close'; // openclose modal/diaglog
 
-// END SECTION
+// END SECTIONalias
 
 // SECTION: doc events
 type WorkspaceEvents =
@@ -38,6 +38,7 @@ type WorkspaceEvents =
   | 'openWorkspaceList';
 type DocEvents =
   | 'createDoc'
+  | 'quickStart'
   | 'renameDoc'
   | 'linkDoc'
   | 'deleteDoc'
@@ -48,6 +49,7 @@ type DocEvents =
   | 'copyBlockToLink'
   | 'bookmark'
   | 'editProperty'
+  | 'editPropertyMeta'
   | 'addProperty';
 type EditorEvents = 'bold' | 'italic' | 'underline' | 'strikeThrough';
 // END SECTION
@@ -86,6 +88,8 @@ type OrganizeEvents =
   | FolderEvents
   | TagEvents
   | FavoriteEvents;
+
+type DNDEvents = 'dragStart' | 'drag' | 'drop';
 // END SECTION
 
 // SECTION: cloud events
@@ -94,7 +98,12 @@ type ShareEvents =
   | 'copyShareLink'
   | 'openShareMenu'
   | 'share';
-type AuthEvents = 'signIn' | 'signInFail' | 'signedIn' | 'signOut';
+type AuthEvents =
+  | 'requestSignIn'
+  | 'signIn'
+  | 'signInFail'
+  | 'signedIn'
+  | 'signOut';
 type AccountEvents = 'uploadAvatar' | 'removeAvatar' | 'updateUserName';
 type PaymentEvents =
   | 'viewPlans'
@@ -107,6 +116,19 @@ type PaymentEvents =
   | 'confirmCancelingSubscription'
   | 'resumeSubscription'
   | 'confirmResumingSubscription';
+// END SECTION
+
+// SECTION: attachment
+type AttachmentEvents =
+  | 'openAttachmentInFullscreen'
+  | 'openAttachmentInNewTab'
+  | 'openAttachmentInPeekView'
+  | 'openAttachmentInSplitView'
+  | 'openPDFRendererFail';
+// END SECTION
+
+// SECTION: template
+type TemplateEvents = 'openTemplateListMenu';
 // END SECTION
 
 type UserEvents =
@@ -122,7 +144,10 @@ type UserEvents =
   | ShareEvents
   | AuthEvents
   | AccountEvents
-  | PaymentEvents;
+  | PaymentEvents
+  | DNDEvents
+  | AttachmentEvents
+  | TemplateEvents;
 interface PageDivision {
   [page: string]: {
     [segment: string]: {
@@ -143,19 +168,19 @@ const PageEvents = {
   $: {
     $: {
       $: ['createWorkspace', 'checkout'],
-      auth: ['signIn', 'signedIn', 'signInFail', 'signOut'],
+      auth: ['requestSignIn', 'signIn', 'signedIn', 'signInFail', 'signOut'],
     },
     sharePanel: {
       $: ['createShareLink', 'copyShareLink', 'export', 'open'],
     },
     docInfoPanel: {
       $: ['open'],
-      property: ['editProperty', 'addProperty'],
+      property: ['editProperty', 'addProperty', 'editPropertyMeta'],
       databaseProperty: ['editProperty'],
     },
     settingsPanel: {
       menu: ['openSettings'],
-      workspace: ['viewPlans', 'export', 'addProperty'],
+      workspace: ['viewPlans', 'export', 'addProperty', 'editPropertyMeta'],
       profileAndBadge: ['viewPlans'],
       accountUsage: ['viewPlans'],
       accountSettings: ['uploadAvatar', 'removeAvatar', 'updateUserName'],
@@ -204,12 +229,18 @@ const PageEvents = {
         'openInNewTab',
         'openInSplitView',
         'toggleFavorite',
+        'drop',
       ],
-      docs: ['createDoc', 'deleteDoc', 'linkDoc'],
-      collections: ['createDoc', 'addDocToCollection', 'removeOrganizeItem'],
-      folders: ['createDoc'],
-      tags: ['createDoc', 'tagDoc'],
-      favorites: ['createDoc'],
+      docs: ['createDoc', 'deleteDoc', 'linkDoc', 'drop'],
+      collections: [
+        'createDoc',
+        'addDocToCollection',
+        'removeOrganizeItem',
+        'drop',
+      ],
+      folders: ['createDoc', 'drop'],
+      tags: ['createDoc', 'tagDoc', 'drop'],
+      favorites: ['createDoc', 'drop'],
       migrationData: ['openMigrationDataHelp'],
       bottomButtons: [
         'downloadApp',
@@ -220,8 +251,8 @@ const PageEvents = {
       others: ['navigate'],
       importModal: ['open'],
       workspaceList: [
+        'requestSignIn',
         'open',
-        'signIn',
         'createWorkspace',
         'createDoc',
         'openSettings',
@@ -236,16 +267,17 @@ const PageEvents = {
       $: ['open', 'close', 'switchPageMode', 'viewPlans'],
     },
     importModal: {
-      $: ['open', 'import'],
+      $: ['open', 'import', 'createDoc'],
     },
     paywall: {
       storage: ['viewPlans'],
       aiAction: ['viewPlans'],
     },
     appTabsHeader: {
-      $: ['tabAction'],
+      $: ['tabAction', 'dragStart'],
     },
     header: {
+      $: ['dragStart'],
       actions: [
         'createDoc',
         'createWorkspace',
@@ -269,27 +301,46 @@ const PageEvents = {
       importModal: ['open'],
       snapshot: ['import', 'export'],
     },
+    attachment: {
+      $: [
+        'openAttachmentInFullscreen',
+        'openAttachmentInNewTab',
+        'openAttachmentInPeekView',
+        'openAttachmentInSplitView',
+        'openPDFRendererFail',
+      ],
+    },
+    sidebar: {
+      newDoc: ['quickStart'],
+      template: ['openTemplateListMenu', 'quickStart'],
+    },
   },
   doc: {
     editor: {
       slashMenu: ['linkDoc', 'createDoc', 'bookmark'],
-      atMenu: ['linkDoc', 'import'],
+      atMenu: ['linkDoc', 'import', 'createDoc'],
       quickSearch: ['createDoc'],
       formatToolbar: ['bold'],
       pageRef: ['navigate'],
       toolbar: ['copyBlockToLink'],
+      aiActions: ['requestSignIn'],
+      pageBlockHeader: ['openDocInfo'],
+      starterBar: ['quickStart', 'openTemplateListMenu'],
     },
     inlineDocInfo: {
       $: ['toggle'],
-      property: ['editProperty', 'addProperty'],
+      property: ['editProperty', 'editPropertyMeta', 'addProperty'],
       databaseProperty: ['editProperty'],
     },
     sidepanel: {
-      property: ['addProperty'],
+      property: ['addProperty', 'editPropertyMeta'],
+    },
+    biDirectionalLinksPanel: {
+      $: ['toggle'],
+      backlinkTitle: ['toggle', 'navigate'],
+      backlinkPreview: ['navigate'],
     },
   },
-  // remove when type added
-  // eslint-disable-next-line @typescript-eslint/ban-types
   edgeless: {},
   workspace: {
     $: {
@@ -310,18 +361,12 @@ const PageEvents = {
       ],
     },
   },
-  // remove when type added
-  // eslint-disable-next-line @typescript-eslint/ban-types
   collection: {
     docList: {
       docMenu: ['removeOrganizeItem'],
     },
   },
-  // remove when type added
-  // eslint-disable-next-line @typescript-eslint/ban-types
   tag: {},
-  // remove when type added
-  // eslint-disable-next-line @typescript-eslint/ban-types
   trash: {},
   subscriptionLanding: {
     $: {
@@ -343,6 +388,10 @@ type OrganizeItemArgs =
 type PaymentEventArgs = {
   plan: string;
   recurring: string;
+};
+
+type AttachmentEventArgs = {
+  type: string; // file type
 };
 
 type TabActionControlType =
@@ -412,6 +461,7 @@ export type EventArgs = {
   toggleFavorite: OrganizeItemArgs & { on: boolean };
   toggle: { type: 'collapse' | 'expand' };
   createDoc: { mode?: 'edgeless' | 'page' };
+  quickStart: { with: 'page' | 'edgeless' | 'template' | 'ai' };
   switchPageMode: { mode: 'edgeless' | 'page' };
   createShareLink: { mode: 'edgeless' | 'page' };
   copyShareLink: {
@@ -423,7 +473,15 @@ export type EventArgs = {
     type: string;
   };
   editProperty: { type: string };
+  editPropertyMeta: { type: string; field: string };
   addProperty: { type: string; control: 'at menu' | 'property list' };
+  linkDoc: { type: string; journal: boolean };
+  drop: { type: string };
+  dragStart: { type: string };
+  openAttachmentInFullscreen: AttachmentEventArgs;
+  openAttachmentInNewTab: AttachmentEventArgs;
+  openAttachmentInPeekView: AttachmentEventArgs;
+  openAttachmentInSplitView: AttachmentEventArgs;
 };
 
 // for type checking

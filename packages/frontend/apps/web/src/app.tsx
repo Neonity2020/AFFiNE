@@ -3,23 +3,19 @@ import { AppContainer } from '@affine/core/desktop/components/app-container';
 import { router } from '@affine/core/desktop/router';
 import { configureCommonModules } from '@affine/core/modules';
 import { I18nProvider } from '@affine/core/modules/i18n';
-import { OpenInAppGuard } from '@affine/core/modules/open-in-app';
-import { configureLocalStorageStateStorageImpls } from '@affine/core/modules/storage';
+import { LifecycleService } from '@affine/core/modules/lifecycle';
+import {
+  configureLocalStorageStateStorageImpls,
+  NbstoreProvider,
+} from '@affine/core/modules/storage';
 import { PopupWindowProvider } from '@affine/core/modules/url';
-import { configureIndexedDBUserspaceStorageProvider } from '@affine/core/modules/userspace';
 import { configureBrowserWorkbenchModule } from '@affine/core/modules/workbench';
-import {
-  configureBrowserWorkspaceFlavours,
-  configureIndexedDBWorkspaceEngineStorageProvider,
-} from '@affine/core/modules/workspace-engine';
+import { configureBrowserWorkspaceFlavours } from '@affine/core/modules/workspace-engine';
 import createEmotionCache from '@affine/core/utils/create-emotion-cache';
+import { WorkerClient } from '@affine/nbstore/worker/client';
 import { CacheProvider } from '@emotion/react';
-import {
-  Framework,
-  FrameworkRoot,
-  getCurrentStore,
-  LifecycleService,
-} from '@toeverything/infra';
+import { Framework, FrameworkRoot, getCurrentStore } from '@toeverything/infra';
+import { OpClient } from '@toeverything/infra/op';
 import { Suspense } from 'react';
 import { RouterProvider } from 'react-router-dom';
 
@@ -34,8 +30,41 @@ configureCommonModules(framework);
 configureBrowserWorkbenchModule(framework);
 configureLocalStorageStateStorageImpls(framework);
 configureBrowserWorkspaceFlavours(framework);
-configureIndexedDBWorkspaceEngineStorageProvider(framework);
-configureIndexedDBUserspaceStorageProvider(framework);
+framework.impl(NbstoreProvider, {
+  openStore(key, options) {
+    if (window.SharedWorker) {
+      const worker = new SharedWorker(
+        new URL(
+          /* webpackChunkName: "nbstore" */ './nbstore.ts',
+          import.meta.url
+        ),
+        { name: key }
+      );
+      const client = new WorkerClient(new OpClient(worker.port), options);
+      return {
+        store: client,
+        dispose: () => {
+          worker.port.postMessage({ type: '__close__' });
+          worker.port.close();
+        },
+      };
+    } else {
+      const worker = new Worker(
+        new URL(
+          /* webpackChunkName: "nbstore" */ './nbstore.ts',
+          import.meta.url
+        )
+      );
+      const client = new WorkerClient(new OpClient(worker), options);
+      return {
+        store: client,
+        dispose: () => {
+          worker.terminate();
+        },
+      };
+    }
+  },
+});
 framework.impl(PopupWindowProvider, {
   open: (target: string) => {
     const targetUrl = new URL(target);
@@ -70,13 +99,11 @@ export function App() {
         <CacheProvider value={cache}>
           <I18nProvider>
             <AffineContext store={getCurrentStore()}>
-              <OpenInAppGuard>
-                <RouterProvider
-                  fallbackElement={<AppContainer fallback />}
-                  router={router}
-                  future={future}
-                />
-              </OpenInAppGuard>
+              <RouterProvider
+                fallbackElement={<AppContainer fallback />}
+                router={router}
+                future={future}
+              />
             </AffineContext>
           </I18nProvider>
         </CacheProvider>

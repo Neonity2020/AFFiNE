@@ -12,7 +12,7 @@ import { View } from './view';
 
 export type WorkbenchPosition = 'beside' | 'active' | 'head' | 'tail' | number;
 
-type WorkbenchOpenOptions = {
+export type WorkbenchOpenOptions = {
   at?: WorkbenchPosition | 'new-tab';
   replaceHistory?: boolean;
   show?: boolean; // only for new tab
@@ -43,23 +43,33 @@ export class Workbench extends Entity {
   activeView$ = LiveData.computed(get => {
     const activeIndex = get(this.activeViewIndex$);
     const views = get(this.views$);
-    return views[activeIndex]; // todo: this could be null
+    // activeIndex could be out of bounds when reordering views
+    return views.at(activeIndex) || views[0];
   });
+
   location$ = LiveData.computed(get => {
     return get(get(this.activeView$).location$);
   });
   sidebarOpen$ = new LiveData(false);
 
-  active(index: number) {
-    index = Math.max(0, Math.min(index, this.views$.value.length - 1));
-    this.activeViewIndex$.next(index);
+  active(index: number | View) {
+    if (typeof index === 'number') {
+      index = Math.max(0, Math.min(index, this.views$.value.length - 1));
+      this.activeViewIndex$.next(index);
+    } else {
+      this.activeViewIndex$.next(this.views$.value.indexOf(index));
+    }
   }
 
   updateBasename(basename: string) {
     this.basename$.next(basename);
   }
 
-  createView(at: WorkbenchPosition = 'beside', defaultLocation: To) {
+  createView(
+    at: WorkbenchPosition = 'beside',
+    defaultLocation: To,
+    active = true
+  ) {
     const view = this.framework.createEntity(View, {
       id: nanoid(),
       defaultLocation,
@@ -68,7 +78,9 @@ export class Workbench extends Entity {
     newViews.splice(this.indexAt(at), 0, view);
     this.views$.next(newViews);
     const index = newViews.indexOf(view);
-    this.active(index);
+    if (active) {
+      this.active(index);
+    }
     return index;
   }
 
@@ -93,7 +105,7 @@ export class Workbench extends Entity {
       const { at = 'active', replaceHistory = false } = option;
       let view = this.viewAt(at);
       if (!view) {
-        const newIndex = this.createView(at, to);
+        const newIndex = this.createView(at, to, option.show);
         view = this.viewAt(newIndex);
         if (!view) {
           throw new Unreachable();
@@ -124,7 +136,12 @@ export class Workbench extends Entity {
   }
 
   openDoc(
-    id: string | ({ docId: string } & ReferenceParams),
+    id:
+      | string
+      | ({ docId: string } & (
+          | ReferenceParams
+          | Record<string, string | undefined>
+        )),
     options?: WorkbenchOpenOptions
   ) {
     const isString = typeof id === 'string';
@@ -139,6 +156,14 @@ export class Workbench extends Entity {
     }
 
     this.open(`/${docId}${query}`, options);
+  }
+
+  openAttachment(
+    docId: string,
+    blockId: string,
+    options?: WorkbenchOpenOptions
+  ) {
+    this.open(`/${docId}/attachments/${blockId}`, options);
   }
 
   openCollections(options?: WorkbenchOpenOptions) {

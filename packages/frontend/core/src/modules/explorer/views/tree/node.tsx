@@ -72,7 +72,8 @@ export interface BaseExplorerTreeNodeProps {
   childrenOperations?: NodeOperation[];
   childrenPlaceholder?: React.ReactNode;
   linkComponent?: React.ComponentType<
-    React.PropsWithChildren<{ to: To; className?: string }> & RefAttributes<any>
+    React.PropsWithChildren<{ to: To; className?: string }> &
+      RefAttributes<any> & { draggable?: boolean }
   >;
   [key: `data-${string}`]: any;
 }
@@ -88,6 +89,34 @@ interface WebExplorerTreeNodeProps extends BaseExplorerTreeNodeProps {
   onDrop?: (data: DropTargetDropEvent<AffineDNDData>) => void;
   dropEffect?: ExplorerTreeNodeDropEffect;
 }
+
+/**
+ * specific rename modal for explorer tree node,
+ * Separate it into a separate component to prevent re-rendering the entire component when width changes.
+ */
+const ExplorerTreeNodeRenameModal = ({
+  setRenaming,
+  handleRename,
+  rawName,
+}: {
+  setRenaming: (renaming: boolean) => void;
+  handleRename: (newName: string) => void;
+  rawName: string | undefined;
+}) => {
+  const appSidebarService = useService(AppSidebarService).sidebar;
+  const sidebarWidth = useLiveData(appSidebarService.width$);
+  return (
+    <RenameModal
+      open
+      width={sidebarWidth - 32}
+      onOpenChange={setRenaming}
+      onRename={handleRename}
+      currentName={rawName ?? ''}
+    >
+      <div className={styles.itemRenameAnchor} />
+    </RenameModal>
+  );
+};
 
 export const ExplorerTreeNode = ({
   children,
@@ -126,9 +155,6 @@ export const ExplorerTreeNode = ({
   const [lastInGroup, setLastInGroup] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const appSidebarService = useService(AppSidebarService).sidebar;
-  const sidebarWidth = useLiveData(appSidebarService.width$);
-
   const { emoji, name } = useMemo(() => {
     if (!extractEmojiAsIcon || !rawName) {
       return {
@@ -160,6 +186,7 @@ export const ExplorerTreeNode = ({
     },
     [canDrop, reorderable]
   );
+
   const {
     dropTargetRef,
     treeInstruction,
@@ -196,6 +223,7 @@ export const ExplorerTreeNode = ({
         }
       },
       canDrop: handleCanDrop,
+      allowExternal: true,
     }),
     [
       dndData?.dropTarget,
@@ -358,12 +386,12 @@ export const ExplorerTreeNode = ({
             e.preventDefault();
           }}
         >
-          {inlineOperations.map(({ view }, index) => (
+          {inlineOperations.map(({ view, index }) => (
             <Fragment key={index}>{view}</Fragment>
           ))}
           {menuOperations.length > 0 && (
             <Menu
-              items={menuOperations.map(({ view }, index) => (
+              items={menuOperations.map(({ view, index }) => (
                 <Fragment key={index}>{view}</Fragment>
               ))}
             >
@@ -379,16 +407,12 @@ export const ExplorerTreeNode = ({
         </div>
       </div>
 
-      {renameable && (
-        <RenameModal
-          open={!!renaming}
-          width={sidebarWidth - 32}
-          onOpenChange={setRenaming}
-          onRename={handleRename}
-          currentName={rawName ?? ''}
-        >
-          <div className={styles.itemRenameAnchor} />
-        </RenameModal>
+      {renameable && renaming && (
+        <ExplorerTreeNodeRenameModal
+          setRenaming={setRenaming}
+          handleRename={handleRename}
+          rawName={rawName}
+        />
       )}
     </div>
   );
@@ -410,7 +434,12 @@ export const ExplorerTreeNode = ({
         ref={dropTargetRef}
       >
         {to ? (
-          <LinkComponent to={to} className={styles.linkItemRoot} ref={dragRef}>
+          <LinkComponent
+            to={to}
+            className={styles.linkItemRoot}
+            ref={dragRef}
+            draggable={false}
+          >
             {content}
           </LinkComponent>
         ) : (
