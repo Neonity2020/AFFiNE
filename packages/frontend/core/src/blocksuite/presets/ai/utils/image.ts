@@ -1,4 +1,4 @@
-import { fetchImage } from '@blocksuite/affine/blocks';
+import { FetchUtils } from '@blocksuite/affine/blocks';
 import { assertExists } from '@blocksuite/affine/global/utils';
 
 export async function fetchImageToFile(
@@ -7,7 +7,7 @@ export async function fetchImageToFile(
   imageProxy?: string
 ): Promise<File | void> {
   try {
-    const res = await fetchImage(url, undefined, imageProxy);
+    const res = await FetchUtils.fetchImage(url, undefined, imageProxy);
     if (res && res.ok) {
       let blob = await res.blob();
       if (!blob.type || !blob.type.startsWith('image/')) {

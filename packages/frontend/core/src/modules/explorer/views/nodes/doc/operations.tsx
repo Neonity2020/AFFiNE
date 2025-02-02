@@ -9,8 +9,10 @@ import { usePageHelper } from '@affine/core/components/blocksuite/block-suite-pa
 import { useBlockSuiteMetaHelper } from '@affine/core/components/hooks/affine/use-block-suite-meta-helper';
 import { useAsyncCallback } from '@affine/core/components/hooks/affine-async-hooks';
 import { IsFavoriteIcon } from '@affine/core/components/pure/icons';
+import { DocsService } from '@affine/core/modules/doc';
 import { CompatibleFavoriteItemsAdapter } from '@affine/core/modules/favorite';
 import { WorkbenchService } from '@affine/core/modules/workbench';
+import { WorkspaceService } from '@affine/core/modules/workspace';
 import { useI18n } from '@affine/i18n';
 import { track } from '@affine/track';
 import {
@@ -22,13 +24,7 @@ import {
   PlusIcon,
   SplitViewIcon,
 } from '@blocksuite/icons/rc';
-import {
-  DocsService,
-  FeatureFlagService,
-  useLiveData,
-  useServices,
-  WorkspaceService,
-} from '@toeverything/infra';
+import { useLiveData, useServices } from '@toeverything/infra';
 import { useCallback, useMemo } from 'react';
 
 import type { NodeOperation } from '../../tree/types';
@@ -46,17 +42,12 @@ export const useExplorerDocNodeOperations = (
     workspaceService,
     docsService,
     compatibleFavoriteItemsAdapter,
-    featureFlagService,
   } = useServices({
     DocsService,
     WorkbenchService,
     WorkspaceService,
     CompatibleFavoriteItemsAdapter,
-    FeatureFlagService,
   });
-  const enableMultiView = useLiveData(
-    featureFlagService.flags.enable_multi_view.$
-  );
   const { openConfirmModal } = useConfirmModal();
 
   const docRecord = useLiveData(docsService.list.doc$(docId));
@@ -191,7 +182,7 @@ export const useExplorerDocNodeOperations = (
           </MenuItem>
         ),
       },
-      ...(BUILD_CONFIG.isElectron && enableMultiView
+      ...(BUILD_CONFIG.isElectron
         ? [
             {
               index: 100,
@@ -237,7 +228,6 @@ export const useExplorerDocNodeOperations = (
       },
     ],
     [
-      enableMultiView,
       favorite,
       handleAddLinkedPage,
       handleDuplicate,

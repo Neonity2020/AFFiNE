@@ -6,6 +6,7 @@ import { useEffect, useMemo } from 'react';
 
 import type { ActivePeekView } from '../entities/peek-view';
 import { PeekViewService } from '../services/peek-view';
+import { AttachmentPreviewPeekView } from './attachment-preview';
 import { DocPeekPreview } from './doc-preview';
 import { ImagePreviewPeekView } from './image-preview';
 import {
@@ -13,6 +14,7 @@ import {
   type PeekViewModalContainerProps,
 } from './modal-container';
 import {
+  AttachmentPeekViewControls,
   DefaultPeekViewControls,
   DocPeekViewControls,
 } from './peek-view-controls';
@@ -23,6 +25,15 @@ function renderPeekView({ info }: ActivePeekView) {
   }
   if (info.type === 'doc') {
     return <DocPeekPreview docRef={info.docRef} />;
+  }
+
+  if (info.type === 'attachment' && info.docRef.blockIds?.[0]) {
+    return (
+      <AttachmentPreviewPeekView
+        docId={info.docRef.docId}
+        blockId={info.docRef.blockIds?.[0]}
+      />
+    );
   }
 
   if (info.type === 'image' && info.docRef.blockIds?.[0]) {
@@ -45,6 +56,10 @@ function renderPeekView({ info }: ActivePeekView) {
 const renderControls = ({ info }: ActivePeekView) => {
   if (info.type === 'doc') {
     return <DocPeekViewControls docRef={info.docRef} />;
+  }
+
+  if (info.type === 'attachment') {
+    return <AttachmentPeekViewControls docRef={info.docRef} />;
   }
 
   if (info.type === 'image') {
@@ -78,6 +93,10 @@ const getRendererProps = (
         ? activePeekView.target.element
         : undefined,
     mode: getMode(activePeekView.info),
+    animation:
+      activePeekView.target.element && getMode(activePeekView.info) !== 'full'
+        ? 'zoom'
+        : 'fade',
     dialogFrame: activePeekView.info.type !== 'image',
   };
 };
@@ -109,8 +128,8 @@ export const PeekViewManagerModal = () => {
   return (
     <PeekViewModalContainer
       {...renderProps}
+      animation={show?.animation ? renderProps?.animation : 'none'}
       open={!!show?.value && !!renderProps}
-      animation={show?.animation || 'none'}
       onOpenChange={open => {
         if (!open) {
           peekViewEntity.close();

@@ -2,6 +2,8 @@ import type { DefaultOpenProperty } from '@affine/core/components/doc-properties
 import {
   type DocMode,
   EdgelessRootService,
+  FeatureFlagService as BSFeatureFlagService,
+  HighlightSelection,
   type ReferenceParams,
 } from '@blocksuite/affine/blocks';
 import type {
@@ -10,13 +12,15 @@ import type {
 } from '@blocksuite/affine/presets';
 import type { InlineEditor } from '@blocksuite/inline';
 import { effect } from '@preact/signals-core';
-import type { DocService, WorkspaceService } from '@toeverything/infra';
 import { Entity, LiveData } from '@toeverything/infra';
 import { defaults, isEqual, omit } from 'lodash-es';
 import { skip } from 'rxjs';
 
+import type { DocService } from '../../doc';
+import { AFFINE_FLAGS, type FeatureFlagService } from '../../feature-flag';
 import { paramsParseOptions, preprocessParams } from '../../navigation/utils';
 import type { WorkbenchView } from '../../workbench';
+import type { WorkspaceService } from '../../workspace';
 import { EditorScope } from '../scopes/editor';
 import type { EditorSelector } from '../types';
 
@@ -30,20 +34,22 @@ export class Editor extends Entity {
   readonly doc = this.docService.doc;
   readonly isSharedMode =
     this.workspaceService.workspace.openOptions.isSharedMode;
-
   readonly editorContainer$ = new LiveData<AffineEditorContainer | null>(null);
   readonly defaultOpenProperty$ = new LiveData<DefaultOpenProperty | undefined>(
     undefined
   );
   workbenchView: WorkbenchView | null = null;
-  defaultScrollPosition:
-    | number
-    | {
-        centerX: number;
-        centerY: number;
-        zoom: number;
-      }
-    | null = null;
+  scrollPosition: {
+    page: number | null;
+    edgeless: {
+      centerX: number;
+      centerY: number;
+      zoom: number;
+    } | null;
+  } = {
+    page: null,
+    edgeless: null,
+  };
 
   private readonly focusAt$ = LiveData.computed(get => {
     const selector = get(this.selector$);
@@ -96,17 +102,25 @@ export class Editor extends Entity {
 
   /**
    * sync editor params with view query string
+   *
+   * this function will be called when editor is initialized with in a workbench view
+   *
+   * this won't be called in shared page.
    */
   bindWorkbenchView(view: WorkbenchView) {
     if (this.workbenchView) {
       throw new Error('already bound');
     }
     this.workbenchView = view;
-    this.defaultScrollPosition = view.getScrollPosition() ?? null;
+    const savedScrollPosition = view.getScrollPosition() ?? null;
+    if (typeof savedScrollPosition === 'number') {
+      this.scrollPosition.page = savedScrollPosition;
+    } else if (typeof savedScrollPosition === 'object') {
+      this.scrollPosition.edgeless = savedScrollPosition;
+    }
 
     const stablePrimaryMode = this.doc.getPrimaryMode();
 
-    // eslint-disable-next-line rxjs/finnish
     const viewParams$ = view
       .queryString$<ReferenceParams & { refreshKey?: string }>(
         paramsParseOptions
@@ -141,17 +155,6 @@ export class Editor extends Entity {
         const selector = omit(params, ['mode']);
         if (!isEqual(selector, omit(editorParams, ['mode']))) {
           this.setSelector(selector);
-        }
-
-        if (params.databaseId && params.databaseRowId) {
-          const defaultOpenProperty: DefaultOpenProperty = {
-            type: 'database',
-            databaseId: params.databaseId,
-            databaseRowId: params.databaseRowId,
-          };
-          if (!isEqual(defaultOpenProperty, this.defaultOpenProperty$.value)) {
-            this.setDefaultOpenProperty(defaultOpenProperty);
-          }
         }
       } finally {
         updating = false;
@@ -192,39 +195,43 @@ export class Editor extends Entity {
     if (this.editorContainer$.value) {
       throw new Error('already bound');
     }
+
+    this._setupBlocksuiteEditorFlags(editorContainer);
     this.editorContainer$.next(editorContainer);
     const unsubs: (() => void)[] = [];
 
     const rootService = editorContainer.host?.std.getService('affine:page');
 
     // ----- Scroll Position and Selection -----
-    if (this.defaultScrollPosition) {
-      // if we have default scroll position, we should restore it
-      if (
-        this.mode$.value === 'page' &&
-        typeof this.defaultScrollPosition === 'number'
-      ) {
-        scrollViewport?.scrollTo(0, this.defaultScrollPosition || 0);
-      } else if (
-        this.mode$.value === 'edgeless' &&
-        typeof this.defaultScrollPosition === 'object' &&
-        rootService instanceof EdgelessRootService
-      ) {
-        rootService.viewport.setViewport(this.defaultScrollPosition.zoom, [
-          this.defaultScrollPosition.centerX,
-          this.defaultScrollPosition.centerY,
-        ]);
-      }
-
-      this.defaultScrollPosition = null; // reset default scroll position
+    // if we have default scroll position, we should restore it
+    if (this.mode$.value === 'page' && this.scrollPosition.page !== null) {
+      scrollViewport?.scrollTo(0, this.scrollPosition.page);
+    } else if (
+      this.mode$.value === 'edgeless' &&
+      this.scrollPosition.edgeless &&
+      rootService instanceof EdgelessRootService
+    ) {
+      rootService.viewport.setViewport(this.scrollPosition.edgeless.zoom, [
+        this.scrollPosition.edgeless.centerX,
+        this.scrollPosition.edgeless.centerY,
+      ]);
     } else {
+      // if we don't have default scroll position, we should focus on the title
       const initialFocusAt = this.focusAt$.value;
 
       if (initialFocusAt === null) {
         const title = docTitle?.querySelector<
           HTMLElement & { inlineEditor: InlineEditor | null }
         >('rich-text');
-        title?.inlineEditor?.focusEnd();
+        // Only focus on the title when it's empty on mobile edition.
+        if (BUILD_CONFIG.isMobileEdition) {
+          const titleText = this.doc.title$.value;
+          if (!titleText?.length) {
+            title?.inlineEditor?.focusEnd();
+          }
+        } else {
+          title?.inlineEditor?.focusEnd();
+        }
       } else {
         const selection = editorContainer.host?.std.selection;
 
@@ -232,7 +239,7 @@ export class Editor extends Entity {
 
         if (mode === this.mode$.value) {
           selection?.setGroup('scene', [
-            selection?.create('highlight', {
+            selection?.create(HighlightSelection, {
               mode,
               [key]: [id],
             }),
@@ -244,16 +251,19 @@ export class Editor extends Entity {
     // update scroll position when scrollViewport scroll
     const saveScrollPosition = () => {
       if (this.mode$.value === 'page' && scrollViewport) {
+        this.scrollPosition.page = scrollViewport.scrollTop;
         this.workbenchView?.setScrollPosition(scrollViewport.scrollTop);
       } else if (
         this.mode$.value === 'edgeless' &&
         rootService instanceof EdgelessRootService
       ) {
-        this.workbenchView?.setScrollPosition({
+        const pos = {
           centerX: rootService.viewport.centerX,
           centerY: rootService.viewport.centerY,
           zoom: rootService.viewport.zoom,
-        });
+        };
+        this.scrollPosition.edgeless = pos;
+        this.workbenchView?.setScrollPosition(pos);
       }
     };
     scrollViewport?.addEventListener('scroll', saveScrollPosition);
@@ -284,7 +294,7 @@ export class Editor extends Entity {
         const { id, key, mode } = anchor;
 
         selection.setGroup('scene', [
-          selection.create('highlight', {
+          selection.create(HighlightSelection, {
             mode,
             [key]: [id],
           }),
@@ -319,9 +329,24 @@ export class Editor extends Entity {
     };
   }
 
+  private _setupBlocksuiteEditorFlags(editorContainer: AffineEditorContainer) {
+    const affineFeatureFlagService = this.featureFlagService;
+    const bsFeatureFlagService = editorContainer.doc.get(BSFeatureFlagService);
+    Object.entries(AFFINE_FLAGS).forEach(([key, flag]) => {
+      if (flag.category === 'blocksuite') {
+        const value =
+          affineFeatureFlagService.flags[key as keyof AFFINE_FLAGS].value;
+        if (value !== undefined) {
+          bsFeatureFlagService.setFlag(flag.bsFlag, value);
+        }
+      }
+    });
+  }
+
   constructor(
     private readonly docService: DocService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly featureFlagService: FeatureFlagService
   ) {
     super();
   }

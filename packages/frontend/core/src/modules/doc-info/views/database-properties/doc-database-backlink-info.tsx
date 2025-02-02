@@ -5,15 +5,11 @@ import {
   PropertyName,
 } from '@affine/component';
 import { AffinePageReference } from '@affine/core/components/affine/reference-link';
+import { DocService } from '@affine/core/modules/doc';
 import { useI18n } from '@affine/i18n';
 import type { DatabaseBlockDataSource } from '@blocksuite/affine/blocks';
 import { DatabaseTableViewIcon, PageIcon } from '@blocksuite/icons/rc';
-import {
-  DocService,
-  LiveData,
-  useLiveData,
-  useService,
-} from '@toeverything/infra';
+import { LiveData, useLiveData, useService } from '@toeverything/infra';
 import { Fragment, useMemo } from 'react';
 import type { Observable } from 'rxjs';
 
@@ -122,12 +118,23 @@ const DatabaseBacklinkRow = ({
 
   return (
     <PropertyCollapsibleSection
-      title={(row.databaseName || t['unnamed']()) + ' ' + t['properties']()}
+      title={
+        <span className={styles.databaseNameWrapper}>
+          <span className={styles.databaseName}>
+            {row.databaseName || t['unnamed']()}
+          </span>
+          {t['properties']()}
+        </span>
+      }
       defaultCollapsed={!defaultOpen}
       icon={<DatabaseTableViewIcon />}
       suffix={
         <AffinePageReference
-          className={styles.docRefLink}
+          className={
+            BUILD_CONFIG.isMobileEdition
+              ? styles.mobileDocRefLink
+              : styles.docRefLink
+          }
           pageId={row.docId}
           params={pageRefParams}
           Icon={PageIcon}
@@ -159,8 +166,9 @@ export const DocDatabaseBacklinkInfo = ({
   onChange,
 }: {
   defaultOpen?: {
-    databaseId: string;
+    databaseBlockId: string;
     rowId: string;
+    docId: string;
   }[];
   onChange?: (
     row: DatabaseRow,
@@ -173,8 +181,11 @@ export const DocDatabaseBacklinkInfo = ({
   const rows = useLiveData(
     useMemo(
       () =>
-        LiveData.from(docDatabaseBacklinks.watchDbBacklinkRows$(doc.id), []),
-      [docDatabaseBacklinks, doc.id]
+        LiveData.from(
+          docDatabaseBacklinks.watchDbBacklinkRows$(doc.id, defaultOpen),
+          []
+        ),
+      [docDatabaseBacklinks, doc.id, defaultOpen]
     )
   );
 
@@ -189,8 +200,9 @@ export const DocDatabaseBacklinkInfo = ({
           <DatabaseBacklinkRow
             defaultOpen={defaultOpen?.some(
               backlink =>
-                backlink.databaseId === databaseBlockId &&
-                backlink.rowId === rowId
+                backlink.databaseBlockId === databaseBlockId &&
+                backlink.rowId === rowId &&
+                backlink.docId === docId
             )}
             row$={row$}
             onChange={onChange}

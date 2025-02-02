@@ -1,15 +1,19 @@
+import { FeatureFlagService } from '@affine/core/modules/feature-flag';
 import {
+  appendParagraphCommand,
   type DocMode,
-  type NoteBlockModel,
-  NoteDisplayMode,
+  focusBlockEnd,
+  getLastNoteBlock,
 } from '@blocksuite/affine/blocks';
+import { Slot } from '@blocksuite/affine/global/utils';
 import type {
   AffineEditorContainer,
   DocTitle,
   EdgelessEditor,
   PageEditor,
 } from '@blocksuite/affine/presets';
-import { type BlockModel, type Doc, Slot } from '@blocksuite/affine/store';
+import { type Store } from '@blocksuite/affine/store';
+import { useLiveData, useService } from '@toeverything/infra';
 import clsx from 'clsx';
 import type React from 'react';
 import {
@@ -26,7 +30,7 @@ import { BlocksuiteDocEditor, BlocksuiteEdgelessEditor } from './lit-adaper';
 import * as styles from './styles.css';
 
 interface BlocksuiteEditorContainerProps {
-  page: Doc;
+  page: Store;
   mode: DocMode;
   shared?: boolean;
   className?: string;
@@ -52,6 +56,8 @@ export const BlocksuiteEditorContainer = forwardRef<
   const docRef = useRef<PageEditor>(null);
   const docTitleRef = useRef<DocTitle>(null);
   const edgelessRef = useRef<EdgelessEditor>(null);
+  const featureFlags = useService(FeatureFlagService).flags;
+  const enableEditorRTL = useLiveData(featureFlags.enable_editor_rtl.$);
 
   const slots: BlocksuiteEditorContainerRef['slots'] = useMemo(() => {
     return {
@@ -147,19 +153,21 @@ export const BlocksuiteEditorContainer = forwardRef<
         lastBlock.flavour === 'affine:paragraph' &&
         lastBlock.text?.length === 0
       ) {
-        std.command.exec('focusBlockEnd' as never, {
-          focusBlock: std.view.getBlock(lastBlock.id) as never,
+        const focusBlock = std.view.getBlock(lastBlock.id) ?? undefined;
+        std.command.exec(focusBlockEnd, {
+          focusBlock,
         });
         return;
       }
     }
 
-    std.command.exec('appendParagraph' as never, {});
+    std.command.exec(appendParagraphCommand);
   }, [affineEditorContainerProxy, page, shared]);
 
   return (
     <div
       data-testid={`editor-${page.id}`}
+      dir={enableEditorRTL ? 'rtl' : 'ltr'}
       className={clsx(
         `editor-wrapper ${mode}-mode`,
         styles.docEditorRoot,
@@ -188,32 +196,3 @@ export const BlocksuiteEditorContainer = forwardRef<
     </div>
   );
 });
-
-// copy from '@blocksuite/affine-shared/utils'
-export function getLastNoteBlock(doc: Doc) {
-  let note: NoteBlockModel | null = null;
-  if (!doc.root) return null;
-  const { children } = doc.root;
-  for (let i = children.length - 1; i >= 0; i--) {
-    const child = children[i];
-    if (
-      matchFlavours(child, ['affine:note']) &&
-      child.displayMode !== NoteDisplayMode.EdgelessOnly
-    ) {
-      note = child as NoteBlockModel;
-      break;
-    }
-  }
-  return note;
-}
-export function matchFlavours<Key extends (keyof BlockSuite.BlockModels)[]>(
-  model: BlockModel | null,
-  expected: Key
-): model is BlockSuite.BlockModels[Key[number]] {
-  return (
-    !!model &&
-    expected.some(
-      key => (model.flavour as keyof BlockSuite.BlockModels) === key
-    )
-  );
-}

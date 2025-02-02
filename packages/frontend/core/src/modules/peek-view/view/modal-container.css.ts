@@ -35,11 +35,18 @@ export const modalContentContainer = style({
     'screen and (width <= 640px)': {
       selectors: {
         [`${modalContentWrapper}:is([data-mode="max"], [data-mode="fit"]) &`]: {
-          height: '60%',
+          height: '80%',
           width: 'calc(100% - 32px)',
           paddingRight: 0,
           paddingBottom: 32,
           alignSelf: 'flex-end',
+        },
+      },
+    },
+    'screen and (width > 640px) and (width <= 1024px)': {
+      selectors: {
+        [`${modalContentWrapper}[data-mode="fit"] &`]: {
+          paddingRight: 12,
         },
       },
     },
@@ -48,7 +55,6 @@ export const modalContentContainer = style({
     [`${modalContentWrapper}[data-mode="max"] &`]: {
       width: 'calc(100% - 64px)',
       height: 'calc(100% - 64px)',
-      paddingRight: 48,
     },
     [`${modalContentWrapper}[data-mode="full"] &`]: {
       width: '100%',
@@ -57,7 +63,6 @@ export const modalContentContainer = style({
     [`${modalContentWrapper}[data-mode="fit"] &`]: {
       width: '90%',
       height: '90%',
-      paddingRight: 48,
       maxWidth: 1248,
     },
     '&[data-anime-state="animating"]': {
@@ -96,7 +101,7 @@ export const modalContent = style({
 
 export const modalControls = style({
   position: 'absolute',
-  right: 0,
+  right: -48,
   top: 0,
   zIndex: -1,
   minWidth: '48px',
@@ -105,6 +110,12 @@ export const modalControls = style({
   '@media': {
     'screen and (width <= 640px)': {
       top: -48,
+      right: 0,
+      left: 0,
+      padding: '8px',
+    },
+    'screen and (width > 640px) and (width <= 1024px)': {
+      paddingLeft: 0,
     },
   },
 });

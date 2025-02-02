@@ -7,6 +7,10 @@ import {
   toReactNode,
   type useConfirmModal,
 } from '@affine/component';
+import { AIChatBlockSchema } from '@affine/core/blocksuite/blocks';
+import { WorkspaceServerService } from '@affine/core/modules/cloud';
+import { DesktopApiService } from '@affine/core/modules/desktop-api';
+import { type DocService, DocsService } from '@affine/core/modules/doc';
 import type { EditorService } from '@affine/core/modules/editor';
 import { EditorSettingService } from '@affine/core/modules/editor-setting';
 import { resolveLinkToDoc } from '@affine/core/modules/navigation';
@@ -19,59 +23,71 @@ import {
   RecentDocsQuickSearchSession,
 } from '@affine/core/modules/quicksearch';
 import { ExternalLinksQuickSearchSession } from '@affine/core/modules/quicksearch/impls/external-links';
+import { JournalsQuickSearchSession } from '@affine/core/modules/quicksearch/impls/journals';
 import { WorkbenchService } from '@affine/core/modules/workbench';
-import { isNewTabTrigger } from '@affine/core/utils';
+import { WorkspaceService } from '@affine/core/modules/workspace';
 import { DebugLogger } from '@affine/debug';
+import { I18n } from '@affine/i18n';
 import { track } from '@affine/track';
 import {
-  type BlockService,
+  BlockServiceWatcher,
   BlockViewIdentifier,
   ConfigIdentifier,
-  type ExtensionType,
   type WidgetComponent,
-  WidgetViewMapIdentifier,
-  type WidgetViewMapType,
 } from '@blocksuite/affine/block-std';
-import { BlockServiceWatcher } from '@blocksuite/affine/block-std';
 import type {
   AffineReference,
   DocMode,
   DocModeProvider,
+  OpenDocConfig,
+  OpenDocConfigItem,
   PeekOptions,
   PeekViewService as BSPeekViewService,
   QuickSearchResult,
   RootBlockConfig,
-  RootService,
 } from '@blocksuite/affine/blocks';
 import {
-  AFFINE_EMBED_CARD_TOOLBAR_WIDGET,
-  AFFINE_FORMAT_BAR_WIDGET,
   AffineSlashMenuWidget,
+  AttachmentEmbedConfigIdentifier,
   DocModeExtension,
   EdgelessRootBlockComponent,
   EmbedLinkedDocBlockComponent,
-  EmbedLinkedDocBlockConfigExtension,
+  GenerateDocUrlExtension,
+  insertLinkByQuickSearchCommand,
+  MobileSpecsPatches,
+  NativeClipboardExtension,
+  NoteConfigExtension,
   NotificationExtension,
-  pageRootWidgetViewMap,
+  OpenDocExtension,
   ParseDocUrlExtension,
   PeekViewExtension,
   QuickSearchExtension,
   ReferenceNodeConfigExtension,
+  SidebarExtension,
 } from '@blocksuite/affine/blocks';
-import { type BlockSnapshot, Text } from '@blocksuite/affine/store';
+import { Bound } from '@blocksuite/affine/global/utils';
 import {
-  AIChatBlockSchema,
-  type DocProps,
-  type DocService,
-  DocsService,
-  type FrameworkProvider,
-  WorkspaceService,
-} from '@toeverything/infra';
+  type BlockSnapshot,
+  type ExtensionType,
+  Text,
+} from '@blocksuite/affine/store';
+import type { ReferenceParams } from '@blocksuite/affine-model';
+import {
+  CenterPeekIcon,
+  ExpandFullIcon,
+  OpenInNewIcon,
+  SplitViewIcon,
+} from '@blocksuite/icons/lit';
+import { type FrameworkProvider } from '@toeverything/infra';
 import { type TemplateResult } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { literal } from 'lit/static-html.js';
 import { pick } from 'lodash-es';
 
+import type { DocProps } from '../../../../../blocksuite/initialization';
+import { AttachmentEmbedPreview } from '../../../../attachment-viewer/pdf-viewer-embedded';
+import { generateUrl } from '../../../../hooks/affine/use-share-url';
+import { EdgelessNoteHeader } from './widgets/edgeless-note-header';
 import { createKeyboardToolbarConfig } from './widgets/keyboard-toolbar';
 
 export type ReferenceReactRenderer = (
@@ -80,21 +96,15 @@ export type ReferenceReactRenderer = (
 
 const logger = new DebugLogger('affine::spec-patchers');
 
-function patchSpecService<Service extends BlockService = BlockService>(
+function patchSpecService(
   flavour: string,
-  onMounted: (service: Service) => (() => void) | void,
   onWidgetConnected?: (component: WidgetComponent) => void
 ) {
   class TempServiceWatcher extends BlockServiceWatcher {
     static override readonly flavour = flavour;
     override mounted() {
       super.mounted();
-      const disposable = onMounted(this.blockService as any);
       const disposableGroup = this.blockService.disposables;
-      if (disposable) {
-        disposableGroup.add(disposable);
-      }
-
       if (onWidgetConnected) {
         disposableGroup.add(
           this.blockService.specSlots.widgetConnected.on(({ component }) => {
@@ -114,13 +124,13 @@ export function patchReferenceRenderer(
   reactToLit: (element: ElementOrFactory) => TemplateResult,
   reactRenderer: ReferenceReactRenderer
 ): ExtensionType {
-  const litRenderer = (reference: AffineReference) => {
+  const customContent = (reference: AffineReference) => {
     const node = reactRenderer(reference);
     return reactToLit(node);
   };
 
   return ReferenceNodeConfigExtension({
-    customContent: litRenderer,
+    customContent,
   });
 }
 
@@ -167,10 +177,10 @@ export function patchNotificationService({
           <div>
             <span style={{ marginBottom: 12 }}>{toReactNode(message)}</span>
             <Input
+              autoSelect={true}
               placeholder={placeholder}
               defaultValue={value}
               onChange={e => (value = e)}
-              ref={input => input?.select()}
             />
           </div>
         );
@@ -188,6 +198,7 @@ export function patchNotificationService({
           onCancel: () => {
             resolve(null);
           },
+          autoFocusConfirm: false,
         });
         abort?.addEventListener('abort', () => {
           resolve(null);
@@ -215,6 +226,7 @@ export function patchNotificationService({
         {
           title: toReactNode(notification.title),
           message: toReactNode(notification.message),
+          footer: toReactNode(notification.footer),
           action: notification.action?.onClick
             ? {
                 label: toReactNode(notification.action?.label),
@@ -237,18 +249,35 @@ export function patchNotificationService({
   });
 }
 
-export function patchEmbedLinkedDocBlockConfig(framework: FrameworkProvider) {
-  const getWorkbench = () => framework.get(WorkbenchService).workbench;
-
-  return EmbedLinkedDocBlockConfigExtension({
-    handleClick(e, _, refInfo) {
-      if (isNewTabTrigger(e)) {
-        const workbench = getWorkbench();
-        workbench.openDoc(refInfo.pageId, { at: 'new-tab' });
-        e.preventDefault();
-      }
-    },
-  });
+export function patchOpenDocExtension() {
+  const openDocConfig: OpenDocConfig = {
+    items: [
+      {
+        type: 'open-in-active-view',
+        label: I18n['com.affine.peek-view-controls.open-doc'](),
+        icon: ExpandFullIcon(),
+      },
+      BUILD_CONFIG.isElectron
+        ? {
+            type: 'open-in-new-view',
+            label:
+              I18n['com.affine.peek-view-controls.open-doc-in-split-view'](),
+            icon: SplitViewIcon(),
+          }
+        : null,
+      {
+        type: 'open-in-new-tab',
+        label: I18n['com.affine.peek-view-controls.open-doc-in-new-tab'](),
+        icon: OpenInNewIcon(),
+      },
+      {
+        type: 'open-in-center-peek',
+        label: I18n['com.affine.peek-view-controls.open-doc-in-center-peek'](),
+        icon: CenterPeekIcon(),
+      },
+    ].filter((item): item is OpenDocConfigItem => item !== null),
+  };
+  return OpenDocExtension(openDocConfig);
 }
 
 export function patchPeekViewService(service: PeekViewService) {
@@ -310,7 +339,6 @@ export function patchDocModeService(
       return (mode || DEFAULT_MODE) as DocMode;
     };
     onPrimaryModeChange = (handler: (mode: DocMode) => void, id?: string) => {
-      // eslint-disable-next-line rxjs/finnish
       const mode$ = id
         ? docsService.list.primaryMode$(id)
         : docService.doc.primaryMode$;
@@ -330,7 +358,7 @@ export function patchQuickSearchService(framework: FrameworkProvider) {
   const QuickSearch = QuickSearchExtension({
     async openQuickSearch() {
       let searchResult: QuickSearchResult = null;
-      searchResult = await new Promise(resolve =>
+      searchResult = await new Promise((resolve, reject) =>
         framework.get(QuickSearchService).quickSearch.show(
           [
             framework.get(RecentDocsQuickSearchSession),
@@ -338,6 +366,7 @@ export function patchQuickSearchService(framework: FrameworkProvider) {
             framework.get(DocsQuickSearchSession),
             framework.get(LinksQuickSearchSession),
             framework.get(ExternalLinksQuickSearchSession),
+            framework.get(JournalsQuickSearchSession),
           ],
           result => {
             if (result === null) {
@@ -368,6 +397,18 @@ export function patchQuickSearchService(framework: FrameworkProvider) {
                   'elementIds',
                 ]),
               });
+              return;
+            }
+
+            if (result.source === 'date-picker') {
+              result.payload
+                .getDocId()
+                .then(docId => {
+                  if (docId) {
+                    resolve({ docId });
+                  }
+                })
+                .catch(reject);
               return;
             }
 
@@ -410,9 +451,8 @@ export function patchQuickSearchService(framework: FrameworkProvider) {
     },
   });
 
-  const SlashMenuQuickSearchExtension = patchSpecService<RootService>(
+  const SlashMenuQuickSearchExtension = patchSpecService(
     'affine:page',
-    () => {},
     (component: WidgetComponent) => {
       if (component instanceof AffineSlashMenuWidget) {
         component.config.items.forEach(item => {
@@ -421,34 +461,28 @@ export function patchQuickSearchService(framework: FrameworkProvider) {
             (item.name === 'Linked Doc' || item.name === 'Link')
           ) {
             item.action = async ({ rootComponent }) => {
-              // @ts-expect-error fixme
-              const { success, insertedLinkType } =
-                // @ts-expect-error fixme
-                rootComponent.std.command.exec('insertLinkByQuickSearch');
+              const [success, { insertedLinkType }] =
+                rootComponent.std.command.exec(insertLinkByQuickSearchCommand);
 
               if (!success) return;
 
               insertedLinkType
-                ?.then(
-                  (type: {
-                    flavour?: 'affine:embed-linked-doc' | 'affine:bookmark';
-                  }) => {
-                    const flavour = type?.flavour;
-                    if (!flavour) return;
+                ?.then(type => {
+                  const flavour = type?.flavour;
+                  if (!flavour) return;
 
-                    if (flavour === 'affine:bookmark') {
-                      track.doc.editor.slashMenu.bookmark();
-                      return;
-                    }
-
-                    if (flavour === 'affine:embed-linked-doc') {
-                      track.doc.editor.slashMenu.linkDoc({
-                        control: 'linkDoc',
-                      });
-                      return;
-                    }
+                  if (flavour === 'affine:bookmark') {
+                    track.doc.editor.slashMenu.bookmark();
+                    return;
                   }
-                )
+
+                  if (flavour === 'affine:embed-linked-doc') {
+                    track.doc.editor.slashMenu.linkDoc({
+                      control: 'linkDoc',
+                    });
+                    return;
+                  }
+                })
                 .catch(console.error);
             };
           }
@@ -466,16 +500,30 @@ export function patchParseDocUrlExtension(framework: FrameworkProvider) {
       const info = resolveLinkToDoc(url);
       if (!info || info.workspaceId !== workspaceService.workspace.id) return;
 
-      return {
-        docId: info.docId,
-        blockIds: info.blockIds,
-        elementIds: info.elementIds,
-        mode: info.mode,
-      };
+      delete info.refreshKey;
+
+      return info;
     },
   });
 
   return [ParseDocUrl];
+}
+
+export function patchGenerateDocUrlExtension(framework: FrameworkProvider) {
+  const workspaceService = framework.get(WorkspaceService);
+  const workspaceServerService = framework.get(WorkspaceServerService);
+  const GenerateDocUrl = GenerateDocUrlExtension({
+    generateDocUrl(pageId: string, params?: ReferenceParams) {
+      return generateUrl({
+        ...params,
+        pageId,
+        workspaceId: workspaceService.workspace.id,
+        baseUrl: workspaceServerService.server?.baseUrl ?? location.origin,
+      });
+    },
+  });
+
+  return [GenerateDocUrl];
 }
 
 export function patchEdgelessClipboard() {
@@ -498,7 +546,7 @@ export function patchEdgelessClipboard() {
                 rootDocId,
                 rootWorkspaceId,
               } = block.props;
-              const blockId = component.service.addBlock(
+              const blockId = component.service.crud.addBlock(
                 AIChatBlockFlavour,
                 {
                   xywh,
@@ -552,12 +600,11 @@ export function patchForSharedPage() {
 }
 
 export function patchForMobile() {
-  const extension: ExtensionType = {
-    setup: di => {
-      // page configs
-      {
+  const extensions: ExtensionType[] = [
+    {
+      setup: di => {
         const pageConfigIdentifier = ConfigIdentifier('affine:page');
-        const prev = di.getFactory(ConfigIdentifier);
+        const prev = di.getFactory(pageConfigIdentifier);
 
         di.override(pageConfigIdentifier, provider => {
           return {
@@ -565,45 +612,71 @@ export function patchForMobile() {
             keyboardToolbar: createKeyboardToolbarConfig(),
           } satisfies RootBlockConfig;
         });
-      }
+      },
+    },
+    MobileSpecsPatches,
+  ];
+  return extensions;
+}
 
-      // Disable some toolbar widgets for mobile.
-      {
-        di.override(WidgetViewMapIdentifier('affine:page'), () => {
-          const ignoreWidgets = [
-            AFFINE_FORMAT_BAR_WIDGET,
-            AFFINE_EMBED_CARD_TOOLBAR_WIDGET,
-          ];
-
-          type pageRootWidgetViewMapKey = keyof typeof pageRootWidgetViewMap;
-          return (
-            Object.keys(pageRootWidgetViewMap) as pageRootWidgetViewMapKey[]
-          ).reduce(
-            (acc, key) => {
-              if (ignoreWidgets.includes(key)) return acc;
-              acc[key] = pageRootWidgetViewMap[key];
-              return acc;
-            },
-            {} as typeof pageRootWidgetViewMap
-          );
-        });
-
-        di.override(
-          WidgetViewMapIdentifier('affine:code'),
-          (): WidgetViewMapType => ({})
-        );
-
-        di.override(
-          WidgetViewMapIdentifier('affine:image'),
-          (): WidgetViewMapType => ({})
-        );
-
-        di.override(
-          WidgetViewMapIdentifier('affine:surface-ref'),
-          (): WidgetViewMapType => ({})
-        );
-      }
+export function patchForAttachmentEmbedViews(
+  reactToLit: (
+    element: ElementOrFactory,
+    rerendering?: boolean
+  ) => TemplateResult
+): ExtensionType {
+  return {
+    setup: di => {
+      di.override(AttachmentEmbedConfigIdentifier('pdf'), () => ({
+        name: 'pdf',
+        check: (model, maxFileSize) =>
+          model.type === 'application/pdf' && model.size <= maxFileSize,
+        action: model => {
+          const bound = Bound.deserialize(model.xywh);
+          bound.w = 537 + 24 + 2;
+          bound.h = 759 + 46 + 24 + 2;
+          model.doc.updateBlock(model, {
+            embed: true,
+            style: 'pdf',
+            xywh: bound.serialize(),
+          });
+        },
+        template: (model, _blobUrl) =>
+          reactToLit(<AttachmentEmbedPreview model={model} />, false),
+      }));
     },
   };
-  return extension;
+}
+
+export function patchForClipboardInElectron(framework: FrameworkProvider) {
+  const desktopApi = framework.get(DesktopApiService);
+  return NativeClipboardExtension({
+    copyAsPNG: desktopApi.handler.clipboard.copyAsPNG,
+  });
+}
+
+export function patchForEdgelessNoteConfig(
+  reactToLit: (element: ElementOrFactory) => TemplateResult
+) {
+  return NoteConfigExtension({
+    edgelessNoteHeader: ({ note }) =>
+      reactToLit(<EdgelessNoteHeader note={note} />),
+  });
+}
+
+export function patchSideBarService(framework: FrameworkProvider) {
+  const { workbench } = framework.get(WorkbenchService);
+
+  return SidebarExtension({
+    open: (tabId?: string) => {
+      workbench.openSidebar();
+      workbench.activeView$.value.activeSidebarTab(tabId ?? null);
+    },
+    close: () => {
+      workbench.closeSidebar();
+    },
+    getTabIds: () => {
+      return workbench.activeView$.value.sidebarTabs$.value.map(tab => tab.id);
+    },
+  });
 }

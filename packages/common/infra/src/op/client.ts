@@ -22,7 +22,7 @@ interface PendingCall extends PromiseWithResolvers<any> {
   timeout: number | NodeJS.Timeout;
 }
 
-interface OpClientOptions {
+export interface OpClientOptions {
   timeout?: number;
 }
 
@@ -31,7 +31,7 @@ export class OpClient<Ops extends OpSchema> extends AutoMessageHandler {
   private readonly pendingCalls = new Map<string, PendingCall>();
   private readonly obs = new Map<string, Observer<any>>();
   private readonly options: OpClientOptions = {
-    timeout: 3000,
+    timeout: Infinity,
   };
 
   constructor(port: MessageCommunicapable, options: OpClientOptions = {}) {
@@ -139,9 +139,12 @@ export class OpClient<Ops extends OpSchema> extends AutoMessageHandler {
       raise('canceled');
     };
 
-    const timeout = setTimeout(() => {
-      raise('timeout');
-    }, this.options.timeout);
+    const timeout =
+      this.options.timeout === Infinity
+        ? 0
+        : setTimeout(() => {
+            raise('timeout');
+          }, this.options.timeout);
 
     const transferables = fetchTransferables(payload);
 
@@ -155,41 +158,36 @@ export class OpClient<Ops extends OpSchema> extends AutoMessageHandler {
     return promise;
   }
 
-  subscribe<Op extends OpNames<Ops>, Out extends OpOutput<Ops, Op>>(
+  ob$<Op extends OpNames<Ops>, Out extends OpOutput<Ops, Op>>(
     op: Op,
-    ...args: [
-      ...OpInput<Ops, Op>,
-      Partial<Observer<Out>> | ((value: Out) => void),
-    ]
-  ): () => void {
-    const payload = args[0];
-    const observer = args[1] as Partial<Observer<Out>> | ((value: Out) => void);
+    ...args: OpInput<Ops, Op>
+  ): Observable<Out> {
+    const sub$ = new Observable<Out>(ob => {
+      const payload = args[0];
 
-    const msg = {
-      type: 'subscribe',
-      id: this.nextCallId(op),
-      name: op as string,
-      payload,
-    } satisfies SubscribeMessage;
+      const msg = {
+        type: 'subscribe',
+        id: this.nextCallId(op),
+        name: op as string,
+        payload,
+      } satisfies SubscribeMessage;
 
-    const sub = new Observable<Out>(ob => {
+      const transferables = fetchTransferables(payload);
+      this.port.postMessage(msg, { transfer: transferables });
+
       this.obs.set(msg.id, ob);
-    }).subscribe(observer);
 
-    sub.add(() => {
-      this.obs.delete(msg.id);
-      this.port.postMessage({
-        type: 'unsubscribe',
-        id: msg.id,
-      } satisfies UnsubscribeMessage);
+      return () => {
+        ob.complete();
+        this.obs.delete(msg.id);
+        this.port.postMessage({
+          type: 'unsubscribe',
+          id: msg.id,
+        } satisfies UnsubscribeMessage);
+      };
     });
 
-    const transferables = fetchTransferables(payload);
-    this.port.postMessage(msg, { transfer: transferables });
-
-    return () => {
-      sub.unsubscribe();
-    };
+    return sub$;
   }
 
   destroy() {

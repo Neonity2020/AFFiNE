@@ -2,7 +2,6 @@ import { ArrowRightSmallIcon } from '@blocksuite/icons/rc';
 import clsx from 'clsx';
 import { useMemo, useState } from 'react';
 import type { Location } from 'react-router-dom';
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports
 import { useLocation, useNavigate } from 'react-router-dom';
 import useSWR from 'swr';
 
@@ -159,11 +158,11 @@ export const OnboardingPage = ({
           <div className={styles.optionsWrapper}>
             {question.options &&
               question.options.length > 0 &&
-              question.options.map((option, optionIndex) => {
+              question.options.map(option => {
                 if (option.type === 'checkbox') {
                   return (
                     <Checkbox
-                      key={optionIndex}
+                      key={option.label}
                       name={option.value}
                       className={styles.checkBox}
                       labelClassName={styles.label}
@@ -184,7 +183,7 @@ export const OnboardingPage = ({
                 } else if (option.type === 'input') {
                   return (
                     <Input
-                      key={optionIndex}
+                      key={option.label}
                       className={styles.input}
                       type="text"
                       size="large"

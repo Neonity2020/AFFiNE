@@ -1,11 +1,7 @@
-import {
-  type Framework,
-  WorkspaceDBService,
-  WorkspaceScope,
-  WorkspaceService,
-} from '@toeverything/infra';
+import { type Framework } from '@toeverything/infra';
 
-import { AuthService } from '../cloud';
+import { WorkspaceDBService } from '../db';
+import { WorkspaceScope, WorkspaceService } from '../workspace';
 import { FavoriteList } from './entities/favorite-list';
 import { FavoriteService } from './services/favorite';
 import {
@@ -14,7 +10,11 @@ import {
 } from './services/old/adapter';
 import { FavoriteStore } from './stores/favorite';
 
-export { FavoriteSupportType, isFavoriteSupportType } from './constant';
+export {
+  FavoriteSupportType,
+  type FavoriteSupportTypeUnion,
+  isFavoriteSupportType,
+} from './constant';
 export type { FavoriteList } from './entities/favorite-list';
 export { FavoriteService } from './services/favorite';
 export {
@@ -27,7 +27,7 @@ export function configureFavoriteModule(framework: Framework) {
     .scope(WorkspaceScope)
     .service(FavoriteService)
     .entity(FavoriteList, [FavoriteStore])
-    .store(FavoriteStore, [AuthService, WorkspaceDBService, WorkspaceService])
+    .store(FavoriteStore, [WorkspaceDBService])
     .service(MigrationFavoriteItemsAdapter, [WorkspaceService])
     .service(CompatibleFavoriteItemsAdapter, [FavoriteService]);
 }

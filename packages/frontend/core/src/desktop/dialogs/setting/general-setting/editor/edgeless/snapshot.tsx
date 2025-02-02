@@ -1,16 +1,33 @@
 import { Skeleton } from '@affine/component';
 import type { EditorSettingSchema } from '@affine/core/modules/editor-setting';
 import { EditorSettingService } from '@affine/core/modules/editor-setting';
+import { AppThemeService } from '@affine/core/modules/theme';
 import type { EditorHost } from '@blocksuite/affine/block-std';
-import { BlockStdScope } from '@blocksuite/affine/block-std';
+import {
+  BlockStdScope,
+  LifeCycleWatcher,
+  StdIdentifier,
+} from '@blocksuite/affine/block-std';
 import type { GfxPrimitiveElementModel } from '@blocksuite/affine/block-std/gfx';
-import type { EdgelessRootService } from '@blocksuite/affine/blocks';
-import { SpecProvider } from '@blocksuite/affine/blocks';
+import type {
+  EdgelessRootService,
+  ThemeExtension,
+} from '@blocksuite/affine/blocks';
+import {
+  ColorScheme,
+  createSignalFromObservable,
+  SpecProvider,
+  ThemeExtensionIdentifier,
+} from '@blocksuite/affine/blocks';
+import type { Container } from '@blocksuite/affine/global/di';
 import { Bound } from '@blocksuite/affine/global/utils';
-import type { Block, Doc } from '@blocksuite/affine/store';
+import type { Block, Store } from '@blocksuite/affine/store';
+import type { Signal } from '@preact/signals-core';
+import type { FrameworkProvider } from '@toeverything/infra';
 import { useFramework } from '@toeverything/infra';
 import { isEqual } from 'lodash-es';
 import { useCallback, useEffect, useRef } from 'react';
+import type { Observable } from 'rxjs';
 import { map, pairwise } from 'rxjs';
 
 import {
@@ -28,8 +45,8 @@ interface Props {
   docName: DocName;
   keyName: keyof EditorSettingSchema;
   height?: number;
-  getElements: (doc: Doc) => Array<Block | GfxPrimitiveElementModel>;
-  firstUpdate?: (doc: Doc, editorHost: EditorHost) => void;
+  getElements: (doc: Store) => Array<Block | GfxPrimitiveElementModel>;
+  firstUpdate?: (doc: Store, editorHost: EditorHost) => void;
   children?: React.ReactElement;
 }
 
@@ -46,7 +63,7 @@ export const EdgelessSnapshot = (props: Props) => {
     children,
   } = props;
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const docRef = useRef<Doc | null>(null);
+  const docRef = useRef<Store | null>(null);
   const editorHostRef = useRef<EditorHost | null>(null);
   const framework = useFramework();
   const { editorSetting } = framework.get(EditorSettingService);
@@ -60,11 +77,11 @@ export const EdgelessSnapshot = (props: Props) => {
     ) as EdgelessRootService;
     const elements = getElements(doc);
     const props = editorSetting.get(keyName) as any;
-    doc.awarenessStore.setReadonly(doc.blockCollection, false);
+    doc.readonly = false;
     elements.forEach(element => {
-      edgelessService.updateElement(element.id, props);
+      edgelessService.crud.updateElement(element.id, props);
     });
-    doc.awarenessStore.setReadonly(doc.blockCollection, true);
+    doc.readonly = true;
   }, [editorSetting, getElements, keyName]);
 
   const renderEditor = useCallback(async () => {
@@ -73,8 +90,11 @@ export const EdgelessSnapshot = (props: Props) => {
     if (!doc) return;
 
     const editorHost = new BlockStdScope({
-      doc,
-      extensions: SpecProvider.getInstance().getSpec('edgeless:preview').value,
+      store: doc,
+      extensions: [
+        ...SpecProvider.getInstance().getSpec('edgeless:preview').value,
+        getThemeExtension(framework),
+      ],
     }).render();
     docRef.current = doc;
     editorHostRef.current?.remove();
@@ -92,7 +112,7 @@ export const EdgelessSnapshot = (props: Props) => {
     ) as EdgelessRootService;
     edgelessService.specSlots.viewConnected.once(({ component }) => {
       const edgelessBlock = component as any;
-      doc.awarenessStore.setReadonly(doc.blockCollection, false);
+      doc.readonly = false;
       edgelessBlock.editorViewportSelector = 'ref-viewport';
       const frame = getFrameBlock(doc);
       if (frame) {
@@ -101,12 +121,12 @@ export const EdgelessSnapshot = (props: Props) => {
       }
       const bound = boundMap.get(docName);
       bound && edgelessService.viewport.setViewportByBound(bound);
-      doc.awarenessStore.setReadonly(doc.blockCollection, true);
+      doc.readonly = true;
     });
 
     // append to dom node
     wrapperRef.current.append(editorHost);
-  }, [docName, firstUpdate, updateElements]);
+  }, [docName, firstUpdate, framework, updateElements]);
 
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -150,3 +170,58 @@ export const EdgelessSnapshot = (props: Props) => {
     </div>
   );
 };
+
+function getThemeExtension(framework: FrameworkProvider) {
+  class AffineThemeExtension
+    extends LifeCycleWatcher
+    implements ThemeExtension
+  {
+    static override readonly key = 'affine-settings-theme';
+
+    private readonly theme: Signal<ColorScheme>;
+
+    protected readonly disposables: (() => void)[] = [];
+
+    static override setup(di: Container) {
+      super.setup(di);
+      di.override(ThemeExtensionIdentifier, AffineThemeExtension, [
+        StdIdentifier,
+      ]);
+    }
+
+    constructor(std: BlockStdScope) {
+      super(std);
+      const theme$: Observable<ColorScheme> = framework
+        .get(AppThemeService)
+        .appTheme.theme$.map(theme => {
+          return theme === ColorScheme.Dark
+            ? ColorScheme.Dark
+            : ColorScheme.Light;
+        });
+      const { signal, cleanup } = createSignalFromObservable<ColorScheme>(
+        theme$,
+        ColorScheme.Light
+      );
+      this.theme = signal;
+      this.disposables.push(cleanup);
+    }
+
+    getAppTheme() {
+      return this.theme;
+    }
+
+    getEdgelessTheme() {
+      return this.theme;
+    }
+
+    override unmounted() {
+      this.dispose();
+    }
+
+    dispose() {
+      this.disposables.forEach(dispose => dispose());
+    }
+  }
+
+  return AffineThemeExtension;
+}

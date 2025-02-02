@@ -1,6 +1,6 @@
 import { Skeleton } from '@affine/component';
-import { Pagination } from '@affine/component/member-components';
 import {
+  Pagination,
   SettingHeader,
   SettingRow,
   SettingWrapper,
@@ -586,15 +586,6 @@ const InvoiceLine = ({
     }
   }, [invoice.link, urlService]);
 
-  const planText =
-    invoice.plan === SubscriptionPlan.AI
-      ? 'AFFiNE AI'
-      : invoice.plan === SubscriptionPlan.Pro
-        ? invoice.recurring === SubscriptionRecurring.Lifetime
-          ? 'AFFiNE Cloud Believer'
-          : 'AFFiNE Cloud'
-        : null;
-
   return (
     <SettingRow
       key={invoice.id}
@@ -603,7 +594,7 @@ const InvoiceLine = ({
         invoice.status === InvoiceStatus.Paid
           ? t['com.affine.payment.billing-setting.paid']()
           : ''
-      } $${invoice.amount / 100} - ${planText}`}
+      } $${invoice.amount / 100}`}
     >
       <Button onClick={open}>
         {t['com.affine.payment.billing-setting.view-invoice']()}

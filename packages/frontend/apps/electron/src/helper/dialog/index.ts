@@ -6,11 +6,11 @@ import {
 } from './dialog';
 
 export const dialogHandlers = {
-  loadDBFile: async () => {
-    return loadDBFile();
+  loadDBFile: async (dbFilePath?: string) => {
+    return loadDBFile(dbFilePath);
   },
-  saveDBFileAs: async (workspaceId: string) => {
-    return saveDBFileAs(workspaceId);
+  saveDBFileAs: async (universalId: string, name: string) => {
+    return saveDBFileAs(universalId, name);
   },
   selectDBFileLocation: async () => {
     return selectDBFileLocation();

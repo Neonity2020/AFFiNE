@@ -1,6 +1,8 @@
 import { TextRenderer } from './_common/components/text-renderer';
 import { AskAIButton } from './ai/_common/components/ask-ai-button';
+import { AskAIIcon } from './ai/_common/components/ask-ai-icon';
 import { AskAIPanel } from './ai/_common/components/ask-ai-panel';
+import { AskAIToolbarButton } from './ai/_common/components/ask-ai-toolbar';
 import { ChatActionList } from './ai/_common/components/chat-action-list';
 import { ChatCopyMore } from './ai/_common/components/copy-more';
 import { ChatPanel } from './ai/chat-panel';
@@ -13,12 +15,17 @@ import { ActionMindmap } from './ai/chat-panel/actions/mindmap';
 import { ActionSlides } from './ai/chat-panel/actions/slides';
 import { ActionText } from './ai/chat-panel/actions/text';
 import { AILoading } from './ai/chat-panel/ai-loading';
-import { ChatCards } from './ai/chat-panel/chat-cards';
+import { ChatPanelChips } from './ai/chat-panel/chat-panel-chips';
 import { ChatPanelInput } from './ai/chat-panel/chat-panel-input';
 import { ChatPanelMessages } from './ai/chat-panel/chat-panel-messages';
+import { ChatPanelAddPopover } from './ai/chat-panel/components/add-popover';
+import { ChatPanelChip } from './ai/chat-panel/components/chip';
+import { ChatPanelDocChip } from './ai/chat-panel/components/doc-chip';
+import { ChatPanelFileChip } from './ai/chat-panel/components/file-chip';
 import { AIErrorWrapper } from './ai/messages/error';
 import { AISlidesRenderer } from './ai/messages/slides-renderer';
 import { AIAnswerWrapper } from './ai/messages/wrapper';
+import { registerMiniMindmapBlocks } from './ai/mini-mindmap';
 import { ChatBlockInput } from './ai/peek-view/chat-block-input';
 import { AIChatBlockPeekView } from './ai/peek-view/chat-block-peek-view';
 import { DateTime } from './ai/peek-view/date-time';
@@ -36,7 +43,10 @@ import { ImagePlaceholder } from './blocks/ai-chat-block/components/image-placeh
 import { UserInfo } from './blocks/ai-chat-block/components/user-info';
 
 export function registerBlocksuitePresetsCustomComponents() {
+  registerMiniMindmapBlocks();
+  customElements.define('ask-ai-icon', AskAIIcon);
   customElements.define('ask-ai-button', AskAIButton);
+  customElements.define('ask-ai-toolbar-button', AskAIToolbarButton);
   customElements.define('ask-ai-panel', AskAIPanel);
   customElements.define('chat-action-list', ChatActionList);
   customElements.define('chat-copy-more', ChatCopyMore);
@@ -49,10 +59,14 @@ export function registerBlocksuitePresetsCustomComponents() {
   customElements.define('action-slides', ActionSlides);
   customElements.define('action-text', ActionText);
   customElements.define('ai-loading', AILoading);
-  customElements.define('chat-cards', ChatCards);
   customElements.define('chat-panel-input', ChatPanelInput);
   customElements.define('chat-panel-messages', ChatPanelMessages);
   customElements.define('chat-panel', ChatPanel);
+  customElements.define('chat-panel-chips', ChatPanelChips);
+  customElements.define('chat-panel-add-popover', ChatPanelAddPopover);
+  customElements.define('chat-panel-doc-chip', ChatPanelDocChip);
+  customElements.define('chat-panel-file-chip', ChatPanelFileChip);
+  customElements.define('chat-panel-chip', ChatPanelChip);
   customElements.define('ai-error-wrapper', AIErrorWrapper);
   customElements.define('ai-slides-renderer', AISlidesRenderer);
   customElements.define('ai-answer-wrapper', AIAnswerWrapper);

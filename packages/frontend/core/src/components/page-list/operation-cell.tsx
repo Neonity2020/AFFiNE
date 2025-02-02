@@ -9,11 +9,13 @@ import {
 import { useBlockSuiteMetaHelper } from '@affine/core/components/hooks/affine/use-block-suite-meta-helper';
 import { useCatchEventCallback } from '@affine/core/components/hooks/use-catch-event-hook';
 import { WorkspaceDialogService } from '@affine/core/modules/dialogs';
+import { DocsService } from '@affine/core/modules/doc';
 import {
   CompatibleFavoriteItemsAdapter,
   FavoriteService,
 } from '@affine/core/modules/favorite';
 import { WorkbenchService } from '@affine/core/modules/workbench';
+import { WorkspaceService } from '@affine/core/modules/workspace';
 import type { Collection, DeleteCollectionInfo } from '@affine/env/filter';
 import { useI18n } from '@affine/i18n';
 import { track } from '@affine/track';
@@ -32,14 +34,7 @@ import {
   ResetIcon,
   SplitViewIcon,
 } from '@blocksuite/icons/rc';
-import {
-  DocsService,
-  FeatureFlagService,
-  useLiveData,
-  useService,
-  useServices,
-  WorkspaceService,
-} from '@toeverything/infra';
+import { useLiveData, useService, useServices } from '@toeverything/infra';
 import type { MouseEvent } from 'react';
 import { useCallback, useState } from 'react';
 
@@ -69,19 +64,15 @@ export const PageOperationCell = ({
 }: PageOperationCellProps) => {
   const t = useI18n();
   const {
-    featureFlagService,
     workspaceService,
     compatibleFavoriteItemsAdapter: favAdapter,
     workbenchService,
   } = useServices({
-    FeatureFlagService,
     WorkspaceService,
     CompatibleFavoriteItemsAdapter,
     WorkbenchService,
   });
-  const enableSplitView = useLiveData(
-    featureFlagService.flags.enable_multi_view.$
-  );
+
   const currentWorkspace = workspaceService.workspace;
   const favourite = useLiveData(favAdapter.isFavorite$(page.id, 'doc'));
   const workbench = workbenchService.workbench;
@@ -119,6 +110,9 @@ export const PageOperationCell = ({
       }),
       cancelText: t['com.affine.confirmModal.button.cancel'](),
       confirmText: t.Delete(),
+      confirmButtonOptions: {
+        variant: 'error',
+      },
       onConfirm: () => {
         docRecord.moveToTrash();
       },
@@ -195,7 +189,7 @@ export const PageOperationCell = ({
       <MenuItem onClick={onOpenInNewTab} prefixIcon={<OpenInNewIcon />}>
         {t['com.affine.workbench.tab.page-menu-open']()}
       </MenuItem>
-      {BUILD_CONFIG.isElectron && enableSplitView ? (
+      {BUILD_CONFIG.isElectron ? (
         <MenuItem onClick={onOpenInSplitView} prefixIcon={<SplitViewIcon />}>
           {t['com.affine.workbench.split-view.page-menu-open']()}
         </MenuItem>

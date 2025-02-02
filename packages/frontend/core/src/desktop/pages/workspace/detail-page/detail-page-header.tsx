@@ -1,7 +1,9 @@
 import {
   Divider,
+  DragHandle,
   type InlineEditHandle,
   observeResize,
+  useDraggable,
 } from '@affine/component';
 import { SharePageButton } from '@affine/core/components/affine/share-page-modal';
 import { FavoriteButton } from '@affine/core/components/blocksuite/block-suite-header/favorite';
@@ -13,14 +15,29 @@ import { DetailPageHeaderPresentButton } from '@affine/core/components/blocksuit
 import { BlocksuiteHeaderTitle } from '@affine/core/components/blocksuite/block-suite-header/title';
 import { EditorModeSwitch } from '@affine/core/components/blocksuite/block-suite-mode-switch';
 import { useRegisterCopyLinkCommands } from '@affine/core/components/hooks/affine/use-register-copy-link-commands';
-import { useDocCollectionPageTitle } from '@affine/core/components/hooks/use-block-suite-workspace-page-title';
 import { HeaderDivider } from '@affine/core/components/pure/header';
+import { DocService } from '@affine/core/modules/doc';
+import { DocDisplayMetaService } from '@affine/core/modules/doc-display-meta';
 import { EditorService } from '@affine/core/modules/editor';
 import { JournalService } from '@affine/core/modules/journal';
+import { TemplateDocService } from '@affine/core/modules/template-doc';
 import { ViewIcon, ViewTitle } from '@affine/core/modules/workbench';
-import type { Doc } from '@blocksuite/affine/store';
-import { useLiveData, useService, type Workspace } from '@toeverything/infra';
-import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
+import type { Workspace } from '@affine/core/modules/workspace';
+import type { AffineDNDData } from '@affine/core/types/dnd';
+import { useI18n } from '@affine/i18n';
+import { track } from '@affine/track';
+import type { Store } from '@blocksuite/affine/store';
+import { useLiveData, useService } from '@toeverything/infra';
+import clsx from 'clsx';
+import {
+  forwardRef,
+  type HTMLAttributes,
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import * as styles from './detail-page-header.css';
 import { useDetailPageHeaderResponsive } from './use-header-responsive';
@@ -42,8 +59,26 @@ const Header = forwardRef<
 
 Header.displayName = 'forwardRef(Header)';
 
+const TemplateMark = memo(function TemplateMark({
+  className,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  const t = useI18n();
+  const doc = useService(DocService).doc;
+  const templateDocService = useService(TemplateDocService);
+  const isTemplate = useLiveData(templateDocService.list.isTemplate$(doc.id));
+
+  if (!isTemplate) return null;
+
+  return (
+    <div className={clsx(styles.templateMark, className)} {...props}>
+      {t['Template']()}
+    </div>
+  );
+});
+
 interface PageHeaderProps {
-  page: Doc;
+  page: Store;
   workspace: Workspace;
 }
 export function JournalPageHeader({ page, workspace }: PageHeaderProps) {
@@ -60,7 +95,11 @@ export function JournalPageHeader({ page, workspace }: PageHeaderProps) {
 
   const { hideShare, hideToday } =
     useDetailPageHeaderResponsive(containerWidth);
-  const title = useDocCollectionPageTitle(workspace.docCollection, page?.id);
+
+  const docDisplayMetaService = useService(DocDisplayMetaService);
+  const i18n = useI18n();
+  const title = i18n.t(useLiveData(docDisplayMetaService.title$(page.id)));
+
   return (
     <Header className={styles.header} ref={containerRef}>
       <ViewTitle title={title} />
@@ -69,6 +108,7 @@ export function JournalPageHeader({ page, workspace }: PageHeaderProps) {
       <div className={styles.journalWeekPicker}>
         <JournalWeekDatePicker page={page} />
       </div>
+      <TemplateMark className={styles.journalTemplateMark} />
       {hideToday ? null : <JournalTodayButton />}
       <HeaderDivider />
       <PageHeaderMenuButton
@@ -106,7 +146,10 @@ export function NormalPageHeader({ page, workspace }: PageHeaderProps) {
     );
   }, []);
 
-  const title = useDocCollectionPageTitle(workspace.docCollection, page?.id);
+  const docDisplayMetaService = useService(DocDisplayMetaService);
+  const i18n = useI18n();
+  const title = i18n.t(useLiveData(docDisplayMetaService.title$(page.id)));
+
   const editor = useService(EditorService).editor;
   const currentMode = useLiveData(editor.mode$);
 
@@ -119,6 +162,7 @@ export function NormalPageHeader({ page, workspace }: PageHeaderProps) {
         docId={page.id}
         inputHandleRef={titleInputHandleRef}
       />
+      <TemplateMark />
       <div className={styles.iconButtonContainer}>
         {hideCollect ? null : (
           <>
@@ -148,8 +192,12 @@ export function NormalPageHeader({ page, workspace }: PageHeaderProps) {
   );
 }
 
-export function DetailPageHeader(props: PageHeaderProps) {
-  const { page, workspace } = props;
+export function DetailPageHeader(
+  props: PageHeaderProps & {
+    onDragging?: (dragging: boolean) => void;
+  }
+) {
+  const { page, workspace, onDragging } = props;
   const journalService = useService(JournalService);
   const isJournal = !!useLiveData(journalService.journalDate$(page.id));
   const isInTrash = page.meta?.trash;
@@ -159,9 +207,53 @@ export function DetailPageHeader(props: PageHeaderProps) {
     docId: page.id,
   });
 
-  return isJournal && !isInTrash ? (
-    <JournalPageHeader {...props} />
-  ) : (
-    <NormalPageHeader {...props} />
+  const { dragRef, dragging, CustomDragPreview } =
+    useDraggable<AffineDNDData>(() => {
+      return {
+        data: {
+          from: {
+            at: 'doc-detail:header',
+            docId: page.id,
+          },
+          entity: {
+            type: 'doc',
+            id: page.id,
+          },
+        },
+        canDrag: args => {
+          // hack for preventing drag when editing the page title
+          const editingElement =
+            args.element.contains(document.activeElement) &&
+            document.activeElement?.tagName === 'INPUT';
+          return !editingElement;
+        },
+        onDragStart: () => {
+          track.$.header.$.dragStart();
+        },
+        dragPreviewPosition: 'pointer-outside',
+      };
+    }, [page.id]);
+
+  const inner =
+    isJournal && !isInTrash ? (
+      <JournalPageHeader {...props} />
+    ) : (
+      <NormalPageHeader {...props} />
+    );
+
+  useEffect(() => {
+    onDragging?.(dragging);
+  }, [dragging, onDragging]);
+
+  return (
+    <>
+      <div className={styles.root} ref={dragRef} data-dragging={dragging}>
+        <DragHandle dragging={dragging} className={styles.dragHandle} />
+        {inner}
+      </div>
+      <CustomDragPreview>
+        <div className={styles.dragPreview}>{inner}</div>
+      </CustomDragPreview>
+    </>
   );
 }

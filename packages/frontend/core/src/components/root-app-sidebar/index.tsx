@@ -1,9 +1,8 @@
-import { useAsyncCallback } from '@affine/core/components/hooks/affine-async-hooks';
+// Import is already correct, no changes needed
 import {
   AddPageButton,
   AppDownloadButton,
   AppSidebar,
-  CategoryDivider,
   MenuItem,
   MenuLinkItem,
   QuickSearchInput,
@@ -11,11 +10,9 @@ import {
   SidebarScrollableContainer,
 } from '@affine/core/modules/app-sidebar/views';
 import { ExternalMenuLinkItem } from '@affine/core/modules/app-sidebar/views/menu-item/external-menu-link-item';
+import { WorkspaceDialogService } from '@affine/core/modules/dialogs';
 import {
-  GlobalDialogService,
-  WorkspaceDialogService,
-} from '@affine/core/modules/dialogs';
-import {
+  CollapsibleSection,
   ExplorerCollections,
   ExplorerFavorites,
   ExplorerMigrationFavorites,
@@ -23,29 +20,21 @@ import {
 } from '@affine/core/modules/explorer';
 import { ExplorerTags } from '@affine/core/modules/explorer/views/sections/tags';
 import { CMDKQuickSearchService } from '@affine/core/modules/quicksearch/services/cmdk';
-import { isNewTabTrigger } from '@affine/core/utils';
+import type { Workspace } from '@affine/core/modules/workspace';
 import { useI18n } from '@affine/i18n';
 import { track } from '@affine/track';
-import type { Doc } from '@blocksuite/affine/store';
+import type { Store } from '@blocksuite/affine/store';
 import {
   AllDocsIcon,
-  GithubIcon,
   ImportIcon,
   JournalIcon,
   SettingsIcon,
 } from '@blocksuite/icons/rc';
-import type { Workspace } from '@toeverything/infra';
-import {
-  useLiveData,
-  useService,
-  useServices,
-  WorkspaceService,
-} from '@toeverything/infra';
-import type { MouseEvent, ReactElement } from 'react';
-import { useCallback } from 'react';
+import { useLiveData, useService, useServices } from '@toeverything/infra';
+import type { ReactElement } from 'react';
+import { memo, useCallback } from 'react';
 
 import { WorkbenchService } from '../../modules/workbench';
-import { usePageHelper } from '../blocksuite/block-suite-page-list/utils';
 import { WorkspaceNavigator } from '../workspace-selector';
 import {
   quickSearch,
@@ -54,6 +43,7 @@ import {
   workspaceWrapper,
 } from './index.css';
 import { AppSidebarJournalButton } from './journal-button';
+import { TemplateDocEntrance } from './template-doc-entrance';
 import { TrashButton } from './trash-button';
 import { UpdaterButton } from './updater-button';
 import { UserInfo } from './user-info';
@@ -64,7 +54,7 @@ export type RootAppSidebarProps = {
   onOpenSettingModal: () => void;
   currentWorkspace: Workspace;
   openPage: (pageId: string) => void;
-  createPage: () => Doc;
+  createPage: () => Store;
   paths: {
     all: (workspaceId: string) => string;
     trash: (workspaceId: string) => string;
@@ -72,48 +62,48 @@ export type RootAppSidebarProps = {
   };
 };
 
+const AllDocsButton = () => {
+  const t = useI18n();
+  const { workbenchService } = useServices({
+    WorkbenchService,
+  });
+  const workbench = workbenchService.workbench;
+  const allPageActive = useLiveData(
+    workbench.location$.selector(location => location.pathname === '/all')
+  );
+
+  return (
+    <MenuLinkItem icon={<AllDocsIcon />} active={allPageActive} to={'/all'}>
+      <span data-testid="all-pages">
+        {t['com.affine.workspaceSubPath.all']()}
+      </span>
+    </MenuLinkItem>
+  );
+};
+
 /**
  * This is for the whole affine app sidebar.
  * This component wraps the app sidebar in `@affine/component` with logic and data.
  *
  */
-export const RootAppSidebar = (): ReactElement => {
-  const { workbenchService, workspaceService, cMDKQuickSearchService } =
-    useServices({
-      WorkspaceService,
-      WorkbenchService,
-      CMDKQuickSearchService,
-    });
-  const currentWorkspace = workspaceService.workspace;
+export const RootAppSidebar = memo((): ReactElement => {
+  const { workbenchService, cMDKQuickSearchService } = useServices({
+    WorkbenchService,
+    CMDKQuickSearchService,
+  });
   const t = useI18n();
-  const globalDialogService = useService(GlobalDialogService);
   const workspaceDialogService = useService(WorkspaceDialogService);
   const workbench = workbenchService.workbench;
-  const currentPath = useLiveData(
-    workbench.location$.map(location => location.pathname)
-  );
   const onOpenQuickSearchModal = useCallback(() => {
     cMDKQuickSearchService.toggle();
   }, [cMDKQuickSearchService]);
 
-  const allPageActive = currentPath === '/all';
-
-  const pageHelper = usePageHelper(currentWorkspace.docCollection);
-
-  const onClickNewPage = useAsyncCallback(
-    async (e?: MouseEvent) => {
-      pageHelper.createPage(undefined, isNewTabTrigger(e) ? 'new-tab' : true);
-      track.$.navigationPanel.$.createDoc();
-    },
-    [pageHelper]
-  );
-
   const onOpenSettingModal = useCallback(() => {
-    globalDialogService.open('setting', {
+    workspaceDialogService.open('setting', {
       activeTab: 'appearance',
     });
     track.$.navigationPanel.$.openSettings();
-  }, [globalDialogService]);
+  }, [workspaceDialogService]);
 
   const handleOpenDocs = useCallback(
     (result: {
@@ -154,11 +144,7 @@ export const RootAppSidebar = (): ReactElement => {
       <SidebarContainer>
         <div className={workspaceAndUserWrapper}>
           <div className={workspaceWrapper}>
-            <WorkspaceNavigator
-              showEnableCloudButton
-              showSettingsButton
-              showSyncStatus
-            />
+            <WorkspaceNavigator showEnableCloudButton showSyncStatus />
           </div>
           <UserInfo />
         </div>
@@ -169,13 +155,9 @@ export const RootAppSidebar = (): ReactElement => {
             data-event-props="$.navigationPanel.$.quickSearch"
             onClick={onOpenQuickSearchModal}
           />
-          <AddPageButton onClick={onClickNewPage} />
+          <AddPageButton />
         </div>
-        <MenuLinkItem icon={<AllDocsIcon />} active={allPageActive} to={'/all'}>
-          <span data-testid="all-pages">
-            {t['com.affine.workspaceSubPath.all']()}
-          </span>
-        </MenuLinkItem>
+        <AllDocsButton />
         <AppSidebarJournalButton />
         <MenuItem
           data-testid="slider-bar-workspace-setting-button"
@@ -193,8 +175,11 @@ export const RootAppSidebar = (): ReactElement => {
         <ExplorerMigrationFavorites />
         <ExplorerCollections />
         <ExplorerTags />
-        <CategoryDivider label={t['com.affine.rootAppSidebar.others']()} />
-        <div style={{ padding: '0 8px' }}>
+        <CollapsibleSection
+          name="others"
+          title={t['com.affine.rootAppSidebar.others']()}
+          contentStyle={{ padding: '6px 8px 0 8px' }}
+        >
           <TrashButton />
           <MenuItem
             data-testid="slider-bar-import-button"
@@ -203,23 +188,19 @@ export const RootAppSidebar = (): ReactElement => {
           >
             <span data-testid="import-modal-trigger">{t['Import']()}</span>
           </MenuItem>
+          <TemplateDocEntrance />
           <ExternalMenuLinkItem
             href="https://affine.pro/blog?tag=Release+Note"
             icon={<JournalIcon />}
             label={t['com.affine.app-sidebar.learn-more']()}
           />
-          <ExternalMenuLinkItem
-            href="https://github.com/toeverything/affine"
-            icon={<GithubIcon />}
-            label={t['com.affine.app-sidebar.star-us']()}
-          />
-        </div>
+        </CollapsibleSection>
       </SidebarScrollableContainer>
       <SidebarContainer>
         {BUILD_CONFIG.isElectron ? <UpdaterButton /> : <AppDownloadButton />}
       </SidebarContainer>
     </AppSidebar>
   );
-};
+});
 
 RootAppSidebar.displayName = 'memo(RootAppSidebar)';
